@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "accumen-types",
+    "accumen-macros",
+    "accumen-sdk",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/AccumulateNetwork/accumen"
+
+[workspace.dependencies]
+accumen-types = { path = "accumen-types" }
+accumen-macros = { path = "accumen-macros" }
+accumen-sdk = { path = "accumen-sdk" }

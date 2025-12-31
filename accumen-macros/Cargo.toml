@@ -1,0 +1,20 @@
+[package]
+name = "accumen-macros"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Procedural macros for Accumen smart contracts"
+repository = "https://github.com/AccumulateNetwork/accumen"
+keywords = ["accumulate", "smart-contracts", "wasm", "blockchain", "macros"]
+categories = ["cryptography", "wasm", "development-tools::procedural-macro-helpers"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+
+[dev-dependencies]
+accumen-types = { path = "../accumen-types" }

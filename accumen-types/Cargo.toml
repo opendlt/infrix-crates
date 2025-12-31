@@ -1,0 +1,20 @@
+[package]
+name = "accumen-types"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Core types for Accumen smart contracts"
+repository = "https://github.com/AccumulateNetwork/accumen"
+keywords = ["accumulate", "smart-contracts", "wasm", "blockchain"]
+categories = ["cryptography", "wasm"]
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["std"]
+std = []
+alloc = []
+
+[dependencies]
+# No external dependencies for no_std compatibility
