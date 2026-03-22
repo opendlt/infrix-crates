@@ -1,7 +1,7 @@
-//! Accumen Types Library
+//! Infrix Types Library
 //!
-//! Core types for building Accumen smart contracts. This crate provides
-//! fundamental types that are used across the Accumen ecosystem.
+//! Core types for building Infrix smart contracts. This crate provides
+//! fundamental types that are used across the Infrix ecosystem.
 //!
 //! # Features
 //!
@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```rust
-//! use accumen_types::{U256, Address, Hash};
+//! use infrix_types::{U256, Address, Hash};
 //!
 //! let balance = U256::from(1000u64);
 //! let zero = U256::zero();

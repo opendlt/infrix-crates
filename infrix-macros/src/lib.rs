@@ -1,6 +1,6 @@
-//! Accumen Contract Procedural Macros
+//! Infrix Contract Procedural Macros
 //!
-//! This crate provides procedural macros for developing Accumen smart contracts.
+//! This crate provides procedural macros for developing Infrix smart contracts.
 //!
 //! # Macros
 //!
@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use accumen_sdk::prelude::*;
+//! use infrix_sdk::prelude::*;
 //!
 //! #[contract]
 //! pub struct Token {
@@ -65,7 +65,7 @@ use syn::{
     Lit, Meta, Pat, PatType, ReturnType, Signature, Token, Type, Visibility,
 };
 
-/// Marks a struct as an Accumen smart contract.
+/// Marks a struct as an Infrix smart contract.
 ///
 /// This macro generates:
 /// - WASM entry points for contract calls
@@ -172,24 +172,24 @@ fn generate_contract(args: ContractArgs, input: ItemStruct) -> syn::Result<Token
 
     // Generate ContractInstance trait implementation
     let contract_impl = quote! {
-        impl accumen_types::ContractInstance for #struct_name {
+        impl infrix_types::ContractInstance for #struct_name {
             fn load() -> Option<Self> {
                 let key = Self::STORAGE_KEY.as_bytes();
-                let data = accumen_sdk::storage::get(key)?;
+                let data = infrix_sdk::storage::get(key)?;
                 Self::decode(&data).ok()
             }
 
-            fn save(&self) -> Result<(), accumen_types::Error> {
+            fn save(&self) -> Result<(), infrix_types::Error> {
                 let key = Self::STORAGE_KEY.as_bytes();
                 let mut buffer = [0u8; 4096];
                 let len = self.encode(&mut buffer)?;
-                accumen_sdk::storage::set(key, &buffer[..len]);
+                infrix_sdk::storage::set(key, &buffer[..len]);
                 Ok(())
             }
 
             fn delete() {
                 let key = Self::STORAGE_KEY.as_bytes();
-                accumen_sdk::storage::delete(key);
+                infrix_sdk::storage::delete(key);
             }
         }
     };
@@ -226,8 +226,8 @@ fn generate_field_accessors(input: &ItemStruct) -> syn::Result<TokenStream2> {
                 /// Get the value of #field_name from storage
                 pub fn #getter_name() -> Option<#field_type> {
                     let key = #storage_key.as_bytes();
-                    let data = accumen_sdk::storage::get(key)?;
-                    <#field_type as accumen_types::Decode>::decode(&data).ok()
+                    let data = infrix_sdk::storage::get(key)?;
+                    <#field_type as infrix_types::Decode>::decode(&data).ok()
                 }
             });
 
@@ -235,11 +235,11 @@ fn generate_field_accessors(input: &ItemStruct) -> syn::Result<TokenStream2> {
             let setter_name = format_ident!("set_{}", field_name);
             accessors.push(quote! {
                 /// Set the value of #field_name in storage
-                pub fn #setter_name(value: &#field_type) -> Result<(), accumen_types::Error> {
+                pub fn #setter_name(value: &#field_type) -> Result<(), infrix_types::Error> {
                     let key = #storage_key.as_bytes();
                     let mut buffer = [0u8; 1024];
-                    let len = <#field_type as accumen_types::Encode>::encode(value, &mut buffer)?;
-                    accumen_sdk::storage::set(key, &buffer[..len]);
+                    let len = <#field_type as infrix_types::Encode>::encode(value, &mut buffer)?;
+                    infrix_sdk::storage::set(key, &buffer[..len]);
                     Ok(())
                 }
             });
@@ -266,32 +266,32 @@ fn generate_encoding_impl(input: &ItemStruct) -> syn::Result<TokenStream2> {
             field_names.push(field_name.clone());
 
             encode_fields.push(quote! {
-                offset += <#field_type as accumen_types::Encode>::encode(&self.#field_name, &mut buffer[offset..])?;
+                offset += <#field_type as infrix_types::Encode>::encode(&self.#field_name, &mut buffer[offset..])?;
             });
 
             decode_fields.push(quote! {
-                let (#field_name, consumed) = <#field_type as accumen_types::Decode>::decode_with_len(&data[offset..])?;
+                let (#field_name, consumed) = <#field_type as infrix_types::Decode>::decode_with_len(&data[offset..])?;
                 offset += consumed;
             });
         }
     }
 
     Ok(quote! {
-        impl accumen_types::Encode for #struct_name {
-            fn encode(&self, buffer: &mut [u8]) -> Result<usize, accumen_types::Error> {
+        impl infrix_types::Encode for #struct_name {
+            fn encode(&self, buffer: &mut [u8]) -> Result<usize, infrix_types::Error> {
                 let mut offset = 0;
                 #(#encode_fields)*
                 Ok(offset)
             }
         }
 
-        impl accumen_types::Decode for #struct_name {
-            fn decode(data: &[u8]) -> Result<Self, accumen_types::Error> {
+        impl infrix_types::Decode for #struct_name {
+            fn decode(data: &[u8]) -> Result<Self, infrix_types::Error> {
                 let (result, _) = Self::decode_with_len(data)?;
                 Ok(result)
             }
 
-            fn decode_with_len(data: &[u8]) -> Result<(Self, usize), accumen_types::Error> {
+            fn decode_with_len(data: &[u8]) -> Result<(Self, usize), infrix_types::Error> {
                 let mut offset = 0;
                 #(#decode_fields)*
                 Ok((Self { #(#field_names),* }, offset))
@@ -346,14 +346,14 @@ fn generate_init(input: ImplItemFn) -> syn::Result<TokenStream2> {
 
         /// WASM entry point for initialization
         #[doc(hidden)]
-        pub fn #wrapper_name(input: &[u8]) -> Result<Self, accumen_types::Error> {
+        pub fn #wrapper_name(input: &[u8]) -> Result<Self, infrix_types::Error> {
             let mut offset = 0;
             #param_decodes
             let instance = Self::#fn_name(#(#param_names),*);
 
             // Handle Result return type
-            let instance = match core::convert::Into::<Result<Self, accumen_types::Error>>::into(
-                accumen_types::IntoResult::into_result(instance)
+            let instance = match core::convert::Into::<Result<Self, infrix_types::Error>>::into(
+                infrix_types::IntoResult::into_result(instance)
             ) {
                 Ok(i) => i,
                 Err(e) => return Err(e),
@@ -477,8 +477,8 @@ fn generate_call(args: CallArgs, input: ImplItemFn) -> syn::Result<TokenStream2>
     // Generate guards
     let payable_check = if !args.payable {
         quote! {
-            if accumen_sdk::env::value() != accumen_types::U256::ZERO {
-                return Err(accumen_types::Error::NotPayable);
+            if infrix_sdk::env::value() != infrix_types::U256::ZERO {
+                return Err(infrix_types::Error::NotPayable);
             }
         }
     } else {
@@ -487,8 +487,8 @@ fn generate_call(args: CallArgs, input: ImplItemFn) -> syn::Result<TokenStream2>
 
     let owner_check = if args.only_owner {
         quote! {
-            if accumen_sdk::env::caller() != accumen_sdk::env::owner() {
-                return Err(accumen_types::Error::Unauthorized);
+            if infrix_sdk::env::caller() != infrix_sdk::env::owner() {
+                return Err(infrix_types::Error::Unauthorized);
             }
         }
     } else {
@@ -507,7 +507,7 @@ fn generate_call(args: CallArgs, input: ImplItemFn) -> syn::Result<TokenStream2>
 
         /// WASM entry point for call
         #[doc(hidden)]
-        pub fn #wrapper_name(&mut self, input: &[u8]) -> Result<accumen_types::CallResult, accumen_types::Error> {
+        pub fn #wrapper_name(&mut self, input: &[u8]) -> Result<infrix_types::CallResult, infrix_types::Error> {
             #payable_check
             #owner_check
 
@@ -517,19 +517,19 @@ fn generate_call(args: CallArgs, input: ImplItemFn) -> syn::Result<TokenStream2>
             let result = self.#fn_name(#(#param_names),*);
 
             // Handle Result return type
-            let result = match accumen_types::IntoResult::into_result(result) {
+            let result = match infrix_types::IntoResult::into_result(result) {
                 Ok(v) => v,
                 Err(e) => return Err(e),
             };
 
             // Encode result
             let mut buffer = [0u8; 4096];
-            let len = accumen_types::Encode::encode(&result, &mut buffer)?;
+            let len = infrix_types::Encode::encode(&result, &mut buffer)?;
 
             // Save state
             self.save()?;
 
-            Ok(accumen_types::CallResult {
+            Ok(infrix_types::CallResult {
                 data: buffer,
                 data_len: len,
             })
@@ -609,23 +609,23 @@ fn generate_view(input: ImplItemFn) -> syn::Result<TokenStream2> {
 
         /// WASM entry point for view
         #[doc(hidden)]
-        pub fn #wrapper_name(&self, input: &[u8]) -> Result<accumen_types::CallResult, accumen_types::Error> {
+        pub fn #wrapper_name(&self, input: &[u8]) -> Result<infrix_types::CallResult, infrix_types::Error> {
             let mut offset = 0;
             #param_decodes
 
             let result = self.#fn_name(#(#param_names),*);
 
             // Handle Result return type
-            let result = match accumen_types::IntoResult::into_result(result) {
+            let result = match infrix_types::IntoResult::into_result(result) {
                 Ok(v) => v,
                 Err(e) => return Err(e),
             };
 
             // Encode result
             let mut buffer = [0u8; 4096];
-            let len = accumen_types::Encode::encode(&result, &mut buffer)?;
+            let len = infrix_types::Encode::encode(&result, &mut buffer)?;
 
-            Ok(accumen_types::CallResult {
+            Ok(infrix_types::CallResult {
                 data: buffer,
                 data_len: len,
             })
@@ -696,14 +696,14 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
     // Generate topic encoding
     let topic_count = indexed_fields.len() + 1; // +1 for event signature
     let mut topic_encodings = vec![quote! {
-        topics[0] = accumen_types::Topic::from_u32(#event_signature);
+        topics[0] = infrix_types::Topic::from_u32(#event_signature);
     }];
 
     for (i, (field_name, _)) in indexed_fields.iter().enumerate() {
         let topic_idx = i + 1;
         topic_encodings.push(quote! {
-            topics[#topic_idx] = accumen_types::Topic::from_hash(
-                accumen_types::Hash::hash_value(&self.#field_name)
+            topics[#topic_idx] = infrix_types::Topic::from_hash(
+                infrix_types::Hash::hash_value(&self.#field_name)
             );
         });
     }
@@ -711,7 +711,7 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
     // Generate data encoding
     let data_encodings: Vec<_> = data_fields.iter().map(|(field_name, _)| {
         quote! {
-            offset += accumen_types::Encode::encode(&self.#field_name, &mut data[offset..])?;
+            offset += infrix_types::Encode::encode(&self.#field_name, &mut data[offset..])?;
         }
     }).collect();
 
@@ -739,25 +739,25 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
             pub const TOPIC_COUNT: usize = #topic_count;
 
             /// Emit this event
-            pub fn emit(&self) -> Result<(), accumen_types::Error> {
-                let mut topics = [accumen_types::Topic::EMPTY; 4];
+            pub fn emit(&self) -> Result<(), infrix_types::Error> {
+                let mut topics = [infrix_types::Topic::EMPTY; 4];
                 #(#topic_encodings)*
 
                 let mut data = [0u8; 1024];
                 let mut offset = 0;
                 #(#data_encodings)*
 
-                accumen_sdk::events::emit(&topics[..#topic_count], &data[..offset]);
+                infrix_sdk::events::emit(&topics[..#topic_count], &data[..offset]);
                 Ok(())
             }
         }
 
-        impl accumen_types::EventTrait for #struct_name {
+        impl infrix_types::EventTrait for #struct_name {
             fn signature() -> u32 {
                 Self::SIGNATURE
             }
 
-            fn emit(&self) -> Result<(), accumen_types::Error> {
+            fn emit(&self) -> Result<(), infrix_types::Error> {
                 self.emit()
             }
         }
@@ -833,9 +833,9 @@ fn generate_storage_map(args: StorageMapArgs, input: syn::ItemType) -> syn::Resu
             pub const PREFIX: &'static str = #storage_prefix;
 
             /// Get a value from the map
-            pub fn get(key: &impl accumen_types::Encode) -> Option<impl accumen_types::Decode> {
+            pub fn get(key: &impl infrix_types::Encode) -> Option<impl infrix_types::Decode> {
                 let mut key_buf = [0u8; 256];
-                let key_len = accumen_types::Encode::encode(key, &mut key_buf).ok()?;
+                let key_len = infrix_types::Encode::encode(key, &mut key_buf).ok()?;
 
                 let mut storage_key = [0u8; 512];
                 let prefix_bytes = Self::PREFIX.as_bytes();
@@ -843,14 +843,14 @@ fn generate_storage_map(args: StorageMapArgs, input: syn::ItemType) -> syn::Resu
                 storage_key[prefix_bytes.len()..prefix_bytes.len() + key_len]
                     .copy_from_slice(&key_buf[..key_len]);
 
-                let data = accumen_sdk::storage::get(&storage_key[..prefix_bytes.len() + key_len])?;
-                accumen_types::Decode::decode(&data).ok()
+                let data = infrix_sdk::storage::get(&storage_key[..prefix_bytes.len() + key_len])?;
+                infrix_types::Decode::decode(&data).ok()
             }
 
             /// Set a value in the map
-            pub fn set(key: &impl accumen_types::Encode, value: &impl accumen_types::Encode) -> Result<(), accumen_types::Error> {
+            pub fn set(key: &impl infrix_types::Encode, value: &impl infrix_types::Encode) -> Result<(), infrix_types::Error> {
                 let mut key_buf = [0u8; 256];
-                let key_len = accumen_types::Encode::encode(key, &mut key_buf)?;
+                let key_len = infrix_types::Encode::encode(key, &mut key_buf)?;
 
                 let mut storage_key = [0u8; 512];
                 let prefix_bytes = Self::PREFIX.as_bytes();
@@ -859,9 +859,9 @@ fn generate_storage_map(args: StorageMapArgs, input: syn::ItemType) -> syn::Resu
                     .copy_from_slice(&key_buf[..key_len]);
 
                 let mut value_buf = [0u8; 4096];
-                let value_len = accumen_types::Encode::encode(value, &mut value_buf)?;
+                let value_len = infrix_types::Encode::encode(value, &mut value_buf)?;
 
-                accumen_sdk::storage::set(
+                infrix_sdk::storage::set(
                     &storage_key[..prefix_bytes.len() + key_len],
                     &value_buf[..value_len]
                 );
@@ -869,9 +869,9 @@ fn generate_storage_map(args: StorageMapArgs, input: syn::ItemType) -> syn::Resu
             }
 
             /// Remove a value from the map
-            pub fn remove(key: &impl accumen_types::Encode) -> Result<(), accumen_types::Error> {
+            pub fn remove(key: &impl infrix_types::Encode) -> Result<(), infrix_types::Error> {
                 let mut key_buf = [0u8; 256];
-                let key_len = accumen_types::Encode::encode(key, &mut key_buf)?;
+                let key_len = infrix_types::Encode::encode(key, &mut key_buf)?;
 
                 let mut storage_key = [0u8; 512];
                 let prefix_bytes = Self::PREFIX.as_bytes();
@@ -879,7 +879,7 @@ fn generate_storage_map(args: StorageMapArgs, input: syn::ItemType) -> syn::Resu
                 storage_key[prefix_bytes.len()..prefix_bytes.len() + key_len]
                     .copy_from_slice(&key_buf[..key_len]);
 
-                accumen_sdk::storage::delete(&storage_key[..prefix_bytes.len() + key_len]);
+                infrix_sdk::storage::delete(&storage_key[..prefix_bytes.len() + key_len]);
                 Ok(())
             }
         }
@@ -943,9 +943,9 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
         let wrapper_name = format_ident!("__call_{}", name);
         quote! {
             #selector => {
-                let mut contract = match <#self_ty as accumen_types::ContractInstance>::load() {
+                let mut contract = match <#self_ty as infrix_types::ContractInstance>::load() {
                     Some(c) => c,
-                    None => return Err(accumen_types::Error::ContractNotInitialized),
+                    None => return Err(infrix_types::Error::ContractNotInitialized),
                 };
                 contract.#wrapper_name(&input[4..])
             }
@@ -956,9 +956,9 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
         let wrapper_name = format_ident!("__view_{}", name);
         quote! {
             #selector => {
-                let contract = match <#self_ty as accumen_types::ContractInstance>::load() {
+                let contract = match <#self_ty as infrix_types::ContractInstance>::load() {
                     Some(c) => c,
-                    None => return Err(accumen_types::Error::ContractNotInitialized),
+                    None => return Err(infrix_types::Error::ContractNotInitialized),
                 };
                 contract.#wrapper_name(&input[4..])
             }
@@ -968,7 +968,7 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
     let init_dispatch = if let Some(init_name) = init_fn {
         quote! {
             if selector == 0 {
-                return <#self_ty>::__init_wrapper(&input[4..]).map(|_| accumen_types::CallResult::empty());
+                return <#self_ty>::__init_wrapper(&input[4..]).map(|_| infrix_types::CallResult::empty());
             }
         }
     } else {
@@ -979,10 +979,10 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
     let call_abi: Vec<_> = call_fns.iter().map(|(name, selector)| {
         let name_str = name.to_string();
         quote! {
-            accumen_types::FunctionAbi {
+            infrix_types::FunctionAbi {
                 name: #name_str,
                 selector: #selector,
-                mutability: accumen_types::Mutability::Mutable,
+                mutability: infrix_types::Mutability::Mutable,
             }
         }
     }).collect();
@@ -990,10 +990,10 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
     let view_abi: Vec<_> = view_fns.iter().map(|(name, selector)| {
         let name_str = name.to_string();
         quote! {
-            accumen_types::FunctionAbi {
+            infrix_types::FunctionAbi {
                 name: #name_str,
                 selector: #selector,
-                mutability: accumen_types::Mutability::View,
+                mutability: infrix_types::Mutability::View,
             }
         }
     }).collect();
@@ -1003,9 +1003,9 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
 
         impl #self_ty {
             /// Dispatch a contract call based on selector
-            pub fn __dispatch(input: &[u8]) -> Result<accumen_types::CallResult, accumen_types::Error> {
+            pub fn __dispatch(input: &[u8]) -> Result<infrix_types::CallResult, infrix_types::Error> {
                 if input.len() < 4 {
-                    return Err(accumen_types::Error::InvalidInput);
+                    return Err(infrix_types::Error::InvalidInput);
                 }
 
                 let selector = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
@@ -1015,13 +1015,13 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
                 match selector {
                     #(#call_arms)*
                     #(#view_arms)*
-                    _ => Err(accumen_types::Error::UnknownFunction),
+                    _ => Err(infrix_types::Error::UnknownFunction),
                 }
             }
 
             /// Get the contract ABI
-            pub fn __abi() -> &'static [accumen_types::FunctionAbi] {
-                const ABI: &[accumen_types::FunctionAbi] = &[
+            pub fn __abi() -> &'static [infrix_types::FunctionAbi] {
+                const ABI: &[infrix_types::FunctionAbi] = &[
                     #(#call_abi,)*
                     #(#view_abi,)*
                 ];
@@ -1031,7 +1031,7 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
 
         /// WASM entry point - called by the runtime
         #[no_mangle]
-        pub extern "C" fn __accumen_call(input_ptr: *const u8, input_len: usize, output_ptr: *mut u8) -> i32 {
+        pub extern "C" fn __infrix_call(input_ptr: *const u8, input_len: usize, output_ptr: *mut u8) -> i32 {
             // Safety: The runtime guarantees valid pointers
             let input = unsafe { core::slice::from_raw_parts(input_ptr, input_len) };
 
@@ -1052,7 +1052,7 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
 
         /// WASM entry point - get contract ABI
         #[no_mangle]
-        pub extern "C" fn __accumen_abi(output_ptr: *mut u8) -> i32 {
+        pub extern "C" fn __infrix_abi(output_ptr: *mut u8) -> i32 {
             let abi = <#self_ty>::__abi();
             let mut offset = 0;
 
@@ -1116,7 +1116,7 @@ fn extract_params(inputs: &Punctuated<FnArg, Token![,]>) -> syn::Result<Vec<(Ide
 fn generate_param_decodes(params: &[(Ident, Type)]) -> syn::Result<TokenStream2> {
     let decodes: Vec<_> = params.iter().map(|(name, ty)| {
         quote! {
-            let (#name, consumed) = <#ty as accumen_types::Decode>::decode_with_len(&input[offset..])?;
+            let (#name, consumed) = <#ty as infrix_types::Decode>::decode_with_len(&input[offset..])?;
             offset += consumed;
         }
     }).collect();

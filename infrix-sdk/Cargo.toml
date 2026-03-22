@@ -1,0 +1,23 @@
+[package]
+name = "infrix-sdk"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "SDK for developing Infrix smart contracts"
+repository = "https://github.com/AccumulateNetwork/infrix"
+keywords = ["accumulate", "smart-contracts", "wasm", "blockchain"]
+categories = ["cryptography", "wasm"]
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["std"]
+std = ["infrix-types/std"]
+alloc = ["infrix-types/alloc"]
+
+[dependencies]
+infrix-types = { path = "../infrix-types" }
+infrix-macros = { path = "../infrix-macros" }
+
+[dev-dependencies]

@@ -1,10 +1,10 @@
 [package]
-name = "accumen-macros"
+name = "infrix-macros"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Procedural macros for Accumen smart contracts"
-repository = "https://github.com/AccumulateNetwork/accumen"
+description = "Procedural macros for Infrix smart contracts"
+repository = "https://github.com/AccumulateNetwork/infrix"
 keywords = ["accumulate", "smart-contracts", "wasm", "blockchain", "macros"]
 categories = ["cryptography", "wasm", "development-tools::procedural-macro-helpers"]
 
@@ -17,4 +17,4 @@ quote = "1.0"
 syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 
 [dev-dependencies]
-accumen-types = { path = "../accumen-types" }
+infrix-types = { path = "../infrix-types" }

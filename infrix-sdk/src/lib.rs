@@ -1,6 +1,6 @@
-//! Accumen Smart Contract SDK
+//! Infrix Smart Contract SDK
 //!
-//! This SDK provides all the tools needed to develop smart contracts for the Accumen platform.
+//! This SDK provides all the tools needed to develop smart contracts for the Infrix platform.
 //!
 //! # Features
 //!
@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use accumen_sdk::prelude::*;
+//! use infrix_sdk::prelude::*;
 //!
 //! #[contract]
 //! pub struct Counter {
@@ -48,12 +48,12 @@
 extern crate alloc;
 
 // Re-export types and macros
-pub use accumen_types::{
+pub use infrix_types::{
     self as types, Address, CallResult, Context, Decode, Encode, Error, Event, EventTrait,
     FunctionAbi, Hash, IntoResult, Mutability, Signature, SignatureType, Topic, U256,
 };
 
-pub use accumen_macros::{call, contract, contract_impl, event, init, storage_map, view};
+pub use infrix_macros::{call, contract, contract_impl, event, init, storage_map, view};
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -79,9 +79,9 @@ pub mod prelude {
 mod host {
     //! Host function declarations for the WASM runtime
     //!
-    //! These functions are provided by the Accumen runtime and called by contracts.
+    //! These functions are provided by the Infrix runtime and called by contracts.
 
-    #[link(wasm_import_module = "accumen")]
+    #[link(wasm_import_module = "infrix")]
     extern "C" {
         // Storage operations
         pub fn host_storage_get(key_ptr: *const u8, key_len: u32, value_ptr: *mut u8) -> i32;

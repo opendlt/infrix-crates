@@ -1,10 +1,10 @@
 [package]
-name = "accumen-types"
+name = "infrix-types"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Core types for Accumen smart contracts"
-repository = "https://github.com/AccumulateNetwork/accumen"
+description = "Core types for Infrix smart contracts"
+repository = "https://github.com/AccumulateNetwork/infrix"
 keywords = ["accumulate", "smart-contracts", "wasm", "blockchain"]
 categories = ["cryptography", "wasm"]
 
