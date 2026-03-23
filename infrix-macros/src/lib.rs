@@ -998,8 +998,13 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
         }
     }).collect();
 
+    // Generate schema section.
+    let schema_section = generate_schema_section(self_ty, &input);
+
     Ok(quote! {
         #input
+
+        #schema_section
 
         impl #self_ty {
             /// Dispatch a contract call based on selector
@@ -1136,6 +1141,236 @@ fn calculate_selector(name: &str) -> u32 {
     hash
 }
 
+// ---- Schema Generation Helpers ----
+
+/// Converts a Rust type to a schema type string.
+fn rust_type_to_schema(ty: &Type) -> String {
+    let s = quote!(#ty).to_string().replace(' ', "");
+    match s.as_str() {
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "u32" => "u32".into(),
+        "u64" => "u64".into(),
+        "f32" => "f32".into(),
+        "f64" => "f64".into(),
+        "bool" => "bool".into(),
+        "String" | "&str" => "string".into(),
+        "Vec<u8>" | "&[u8]" => "bytes".into(),
+        "Address" | "infrix_types::Address" => "address".into(),
+        "U256" | "infrix_types::U256" => "u256".into(),
+        "Hash" | "infrix_types::Hash" | "[u8;32]" => "bytes32".into(),
+        "[u8;20]" => "bytes20".into(),
+        "u128" => "u128".into(),
+        _ if s.starts_with("Option<") => {
+            let inner = &s[7..s.len()-1];
+            format!("option<{}>", inner)
+        }
+        _ if s.starts_with("Vec<") => {
+            let inner = &s[4..s.len()-1];
+            format!("array<{}>", inner)
+        }
+        _ => s,
+    }
+}
+
+/// Extracts the return type from a function signature for schema purposes.
+fn extract_return_schema(output: &ReturnType) -> Vec<(String, String)> {
+    match output {
+        ReturnType::Default => vec![],
+        ReturnType::Type(_, ty) => {
+            let type_str = quote!(#ty).to_string().replace(' ', "");
+            // Handle Result<T, Error> → extract T
+            if type_str.starts_with("Result<") {
+                let inner = &type_str[7..];
+                if let Some(comma_pos) = inner.find(',') {
+                    let ok_type = inner[..comma_pos].trim();
+                    if ok_type == "()" {
+                        return vec![];
+                    }
+                    return vec![("result".into(), rust_type_to_schema_str(ok_type))];
+                }
+            }
+            if type_str == "()" {
+                return vec![];
+            }
+            // Handle Self → skip (constructor)
+            if type_str == "Self" {
+                return vec![];
+            }
+            vec![("result".into(), rust_type_to_schema(ty))]
+        }
+    }
+}
+
+/// Converts a type string (not AST) to a schema type.
+fn rust_type_to_schema_str(s: &str) -> String {
+    match s.trim() {
+        "i32" => "i32".into(),
+        "i64" => "i64".into(),
+        "u32" => "u32".into(),
+        "u64" => "u64".into(),
+        "bool" => "bool".into(),
+        "String" | "&str" => "string".into(),
+        "U256" => "u256".into(),
+        "Address" => "address".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Extracts doc comments from attributes (/// comments become #[doc = "..."])
+fn extract_doc_comment(attrs: &[Attribute]) -> String {
+    let mut docs = Vec::new();
+    for attr in attrs {
+        if attr.path().is_ident("doc") {
+            if let Meta::NameValue(nv) = &attr.meta {
+                if let Expr::Lit(expr_lit) = &nv.value {
+                    if let Lit::Str(s) = &expr_lit.lit {
+                        docs.push(s.value().trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+    docs.join(" ")
+}
+
+/// Builds a JSON string representing the contract schema from collected metadata.
+fn build_schema_json(
+    contract_name: &str,
+    functions: &[(String, String, Vec<(String, String)>, Vec<(String, String)>, String)],
+    // (name, mutability, params[(name,type)], returns[(name,type)], doc)
+    events: &[(String, Vec<(String, String, bool)>)],
+    // (name, fields[(name, type, indexed)])
+) -> String {
+    let mut json = String::new();
+    json.push_str("{\n");
+    json.push_str(&format!("  \"schema_version\": 1,\n"));
+    json.push_str(&format!("  \"name\": \"{}\",\n", escape_json(contract_name)));
+    json.push_str("  \"functions\": [\n");
+
+    for (i, (name, mutability, params, returns, doc)) in functions.iter().enumerate() {
+        json.push_str("    {\n");
+        json.push_str(&format!("      \"name\": \"{}\",\n", escape_json(name)));
+        json.push_str(&format!("      \"mutability\": \"{}\",\n", escape_json(mutability)));
+
+        json.push_str("      \"params\": [");
+        for (j, (pname, ptype)) in params.iter().enumerate() {
+            if j > 0 { json.push_str(", "); }
+            json.push_str(&format!("{{\"name\":\"{}\",\"type\":\"{}\"}}", escape_json(pname), escape_json(ptype)));
+        }
+        json.push_str("],\n");
+
+        json.push_str("      \"returns\": [");
+        for (j, (rname, rtype)) in returns.iter().enumerate() {
+            if j > 0 { json.push_str(", "); }
+            json.push_str(&format!("{{\"name\":\"{}\",\"type\":\"{}\"}}", escape_json(rname), escape_json(rtype)));
+        }
+        json.push_str("]");
+
+        if !doc.is_empty() {
+            json.push_str(&format!(",\n      \"doc\": \"{}\"", escape_json(doc)));
+        }
+
+        json.push_str("\n    }");
+        if i < functions.len() - 1 { json.push(','); }
+        json.push('\n');
+    }
+    json.push_str("  ]");
+
+    if !events.is_empty() {
+        json.push_str(",\n  \"events\": [\n");
+        for (i, (name, fields)) in events.iter().enumerate() {
+            json.push_str("    {\n");
+            json.push_str(&format!("      \"name\": \"{}\",\n", escape_json(name)));
+            json.push_str("      \"fields\": [");
+            for (j, (fname, ftype, indexed)) in fields.iter().enumerate() {
+                if j > 0 { json.push_str(", "); }
+                json.push_str(&format!(
+                    "{{\"name\":\"{}\",\"type\":\"{}\",\"indexed\":{}}}",
+                    escape_json(fname), escape_json(ftype), indexed
+                ));
+            }
+            json.push_str("]\n    }");
+            if i < events.len() - 1 { json.push(','); }
+            json.push('\n');
+        }
+        json.push_str("  ]");
+    }
+
+    json.push_str("\n}");
+    json
+}
+
+fn escape_json(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+}
+
+/// Collects schema metadata from a contract_impl block and generates the
+/// schema JSON + link_section static.
+fn generate_schema_section(self_ty: &Type, input: &ItemImpl) -> TokenStream2 {
+    let contract_name = quote!(#self_ty).to_string();
+    let mut functions = Vec::new();
+
+    for item in &input.items {
+        if let ImplItem::Fn(method) = item {
+            let fn_name = method.sig.ident.to_string();
+            let doc = extract_doc_comment(&method.attrs);
+
+            let mut mutability = None;
+            for attr in &method.attrs {
+                if attr.path().is_ident("init") {
+                    mutability = Some("init".to_string());
+                } else if attr.path().is_ident("call") {
+                    mutability = Some("mutable".to_string());
+                    // Check for payable
+                    if let Ok(args) = attr.parse_args::<proc_macro2::TokenStream>() {
+                        if args.to_string().contains("payable") {
+                            mutability = Some("payable".to_string());
+                        }
+                    }
+                } else if attr.path().is_ident("view") {
+                    mutability = Some("view".to_string());
+                }
+            }
+
+            if let Some(mut_str) = mutability {
+                let params_raw = extract_params(&method.sig.inputs).unwrap_or_default();
+                let params: Vec<(String, String)> = params_raw.iter()
+                    .map(|(name, ty)| (name.to_string(), rust_type_to_schema(ty)))
+                    .collect();
+
+                let returns = extract_return_schema(&method.sig.output);
+
+                functions.push((fn_name, mut_str, params, returns, doc));
+            }
+        }
+    }
+
+    // For now, events are not collected here (they're separate #[event] structs).
+    // A global event registry would be needed. We pass empty for Phase 2.
+    let events: Vec<(String, Vec<(String, String, bool)>)> = Vec::new();
+
+    let schema_json = build_schema_json(&contract_name, &functions, &events);
+    let schema_bytes = schema_json.as_bytes();
+    let schema_len = schema_bytes.len();
+
+    // Generate a static that embeds the schema in a WASM custom section.
+    quote! {
+        #[cfg(target_arch = "wasm32")]
+        #[link_section = "infrix:schema"]
+        #[used]
+        static __INFRIX_SCHEMA: [u8; #schema_len] = [#(#schema_bytes),*];
+
+        /// Returns the embedded contract schema as a JSON string.
+        impl #self_ty {
+            pub fn __schema_json() -> &'static str {
+                const SCHEMA: &str = #schema_json;
+                SCHEMA
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1154,6 +1389,66 @@ mod tests {
     #[test]
     fn test_contract_args_parse() {
         // Test parsing would require setting up proc_macro2 test infrastructure
+    }
+
+    #[test]
+    fn test_rust_type_to_schema() {
+        let cases = vec![
+            ("i32", "i32"),
+            ("i64", "i64"),
+            ("u32", "u32"),
+            ("u64", "u64"),
+            ("bool", "bool"),
+            ("String", "string"),
+            ("u128", "u128"),
+        ];
+        for (input, expected) in cases {
+            let ty: Type = syn::parse_str(input).unwrap();
+            assert_eq!(rust_type_to_schema(&ty), expected, "for type {}", input);
+        }
+    }
+
+    #[test]
+    fn test_build_schema_json() {
+        let functions = vec![
+            ("increment".into(), "mutable".into(), vec![], vec![("count".into(), "i32".into())], "Increments the counter.".into()),
+            ("set".into(), "mutable".into(), vec![("value".into(), "i32".into())], vec![], String::new()),
+        ];
+        let events: Vec<(String, Vec<(String, String, bool)>)> = vec![];
+        let json = build_schema_json("Counter", &functions, &events);
+
+        assert!(json.contains("\"schema_version\": 1"));
+        assert!(json.contains("\"name\": \"Counter\""));
+        assert!(json.contains("\"name\": \"increment\""));
+        assert!(json.contains("\"mutability\": \"mutable\""));
+        assert!(json.contains("\"doc\": \"Increments the counter.\""));
+        assert!(json.contains("\"name\": \"set\""));
+        assert!(json.contains("\"type\":\"i32\""));
+    }
+
+    #[test]
+    fn test_build_schema_json_with_events() {
+        let functions = vec![];
+        let events = vec![
+            ("Transfer".into(), vec![
+                ("from".into(), "address".into(), true),
+                ("to".into(), "address".into(), true),
+                ("amount".into(), "u256".into(), false),
+            ]),
+        ];
+        let json = build_schema_json("Token", &functions, &events);
+
+        assert!(json.contains("\"events\""));
+        assert!(json.contains("\"name\": \"Transfer\""));
+        assert!(json.contains("\"indexed\":true"));
+        assert!(json.contains("\"indexed\":false"));
+    }
+
+    #[test]
+    fn test_escape_json() {
+        assert_eq!(escape_json("hello"), "hello");
+        assert_eq!(escape_json("hello \"world\""), "hello \\\"world\\\"");
+        assert_eq!(escape_json("line1\nline2"), "line1\\nline2");
     }
 }
 
