@@ -148,3 +148,30 @@ pub fn cancel_schedule(_callback_id: u64) -> bool {
     // In WASM mode, calls env::cancel_schedule().
     false
 }
+
+// ---- Alternative Timelines: Counterfactual Simulation ----
+
+/// Result of a counterfactual simulation.
+pub struct SimulationResult {
+    pub success: bool,
+    pub return_values: Vec<u64>,
+    pub gas_used: u64,
+    pub error: Option<String>,
+}
+
+impl SimulationResult {
+    pub fn would_succeed(&self) -> bool { self.success }
+    pub fn return_i32(&self) -> i32 {
+        self.return_values.first().map(|v| *v as i32).unwrap_or(0)
+    }
+}
+
+/// Simulate calling a function without committing state changes.
+pub fn simulate(_function: &str, _args: &[u64]) -> SimulationResult {
+    SimulationResult { success: false, return_values: Vec::new(), gas_used: 0, error: Some("not available in native mode".into()) }
+}
+
+/// Simulate with state overrides for scenario comparison.
+pub fn simulate_with_overrides(_function: &str, _args: &[u64], _overrides: &[(&str, &[u8])]) -> SimulationResult {
+    SimulationResult { success: false, return_values: Vec::new(), gas_used: 0, error: Some("not available in native mode".into()) }
+}
