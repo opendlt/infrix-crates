@@ -64,6 +64,9 @@ pub mod temporal;
 /// encryption based on visibility policies.
 pub mod shadow;
 
+/// Sentient Contracts — native data feeds, timestamps, and randomness.
+pub mod sentient;
+
 /// Contract testing framework.
 ///
 /// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and
