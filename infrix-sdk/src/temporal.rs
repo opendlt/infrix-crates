@@ -111,3 +111,40 @@ pub fn my_unique_callers(_last_n_blocks: u64) -> u64 {
     // In WASM mode, calls env::my_unique_callers().
     0
 }
+
+// ---- Future: Self-Scheduling ----
+
+/// Schedule a one-time function call at a future block height.
+///
+/// The runtime guarantees execution at or after the target block.
+/// Returns a callback ID that can be used to cancel.
+///
+/// # Cost
+/// ~1000 gas.
+pub fn schedule_at(_target_block: u64, _function: &str, _args: &[u64]) -> u64 {
+    // In WASM mode, calls env::schedule_at().
+    0
+}
+
+/// Schedule a recurring function call every N blocks.
+///
+/// The callback re-enqueues automatically after each execution.
+/// Set `max_executions` to 0 for infinite repetition.
+///
+/// # Cost
+/// ~2000 gas.
+pub fn schedule_recurring(_interval_blocks: u64, _function: &str, _args: &[u64], _max_executions: u32) -> u64 {
+    // In WASM mode, calls env::schedule_recurring().
+    0
+}
+
+/// Cancel a previously scheduled callback.
+///
+/// Returns true if the callback was found and cancelled.
+///
+/// # Cost
+/// ~100 gas.
+pub fn cancel_schedule(_callback_id: u64) -> bool {
+    // In WASM mode, calls env::cancel_schedule().
+    false
+}
