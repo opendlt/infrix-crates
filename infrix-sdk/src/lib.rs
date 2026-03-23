@@ -56,6 +56,10 @@ pub use infrix_types::{
 pub use infrix_macros::{call, contract, contract_impl, event, init, storage_map, view};
 pub use infrix_macros::{infrix_test, infrix_fuzz};
 
+/// Programmable Time — temporal primitives for historical queries,
+/// self-awareness, and (in future phases) scheduling and simulation.
+pub mod temporal;
+
 /// Contract testing framework.
 ///
 /// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and
