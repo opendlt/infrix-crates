@@ -923,7 +923,7 @@ pub struct Event {
 impl Default for Event {
     fn default() -> Self {
         Self {
-            topics: [[0u8; 32]; 4],
+            topics: [Topic([0u8; 32]); 4],
             topic_count: 0,
             data: [0u8; 1024],
             data_len: 0,
@@ -1450,7 +1450,7 @@ pub mod abi {
         for (i, &b) in bytes.iter().take(32).enumerate() {
             topic[i] = b;
         }
-        topic
+        Topic(topic)
     }
 }
 

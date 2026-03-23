@@ -1156,3 +1156,149 @@ mod tests {
         // Test parsing would require setting up proc_macro2 test infrastructure
     }
 }
+
+// ---- Test Framework Macros ----
+
+/// Marks a function as an Infrix contract test.
+///
+/// The test function receives a mutable reference to a `TestContext` and should
+/// use assertions to verify contract behavior. When compiled to WASM, the
+/// function is exported with its original name (which must start with `test_`)
+/// so the `infrix test` CLI discovers and executes it.
+///
+/// In `cargo test` mode the function runs with a mock `TestContext`.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::testing::*;
+///
+/// #[infrix_test]
+/// fn test_increment(ctx: &mut TestContext) {
+///     let counter = ctx.deploy("acc://test/counter");
+///     let receipt = ctx.call(&counter, "increment", &[]);
+///     assert!(receipt.is_success());
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn infrix_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+    match generate_infrix_test(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn generate_infrix_test(input: ItemFn) -> syn::Result<TokenStream2> {
+    let fn_name = &input.sig.ident;
+    let fn_body = &input.block;
+    let fn_vis = &input.vis;
+
+    // Validate the function name starts with test_.
+    let name_str = fn_name.to_string();
+    if !name_str.starts_with("test_") {
+        return Err(syn::Error::new(
+            fn_name.span(),
+            "#[infrix_test] functions must be named test_*",
+        ));
+    }
+
+    // Generate a WASM-exported wrapper that:
+    // 1. Creates a TestContext
+    // 2. Calls the user's test function
+    // 3. Returns 0 on success (panic = trap = failure in WASM)
+    //
+    // Also generate a #[test] function for `cargo test`.
+    let wasm_export_name = format_ident!("{}", name_str);
+    let cargo_test_name = format_ident!("cargo_{}", name_str);
+
+    Ok(quote! {
+        // WASM export: discovered by `infrix test` CLI.
+        #[no_mangle]
+        #fn_vis extern "C" fn #wasm_export_name() -> i32 {
+            let mut ctx = infrix_sdk::testing::TestContext::new();
+            let inner = |ctx: &mut infrix_sdk::testing::TestContext| #fn_body;
+            inner(&mut ctx);
+            0 // success
+        }
+
+        // `cargo test` runner.
+        #[cfg(test)]
+        #[test]
+        fn #cargo_test_name() {
+            let mut ctx = infrix_sdk::testing::TestContext::new();
+            let inner = |ctx: &mut infrix_sdk::testing::TestContext| #fn_body;
+            inner(&mut ctx);
+        }
+    })
+}
+
+/// Marks a function as a fuzz test.
+///
+/// Fuzz test functions receive a `TestContext` and one or more random input
+/// parameters. The `infrix test` CLI generates random inputs and calls the
+/// function repeatedly.
+///
+/// # Example
+///
+/// ```ignore
+/// #[infrix_fuzz(runs = 1000)]
+/// fn fuzz_set_get(ctx: &mut TestContext, value: i32) {
+///     let contract = ctx.deploy("acc://test/counter");
+///     ctx.call(&contract, "set", &[value as i64]);
+///     let result = ctx.query(&contract, "get_count", &[]);
+///     assert_eq!(result.return_i32(), value);
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn infrix_fuzz(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+    let _ = attr; // Fuzz runs count parsed at runtime by the CLI.
+
+    match generate_infrix_fuzz(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn generate_infrix_fuzz(input: ItemFn) -> syn::Result<TokenStream2> {
+    let fn_name = &input.sig.ident;
+    let fn_body = &input.block;
+    let fn_vis = &input.vis;
+
+    let name_str = fn_name.to_string();
+    if !name_str.starts_with("fuzz_") {
+        return Err(syn::Error::new(
+            fn_name.span(),
+            "#[infrix_fuzz] functions must be named fuzz_*",
+        ));
+    }
+
+    // For WASM export, the fuzz function takes an i32 parameter that the
+    // Go runner supplies with random values.
+    let wasm_export_name = format_ident!("{}", name_str);
+    let cargo_test_name = format_ident!("cargo_{}", name_str);
+
+    Ok(quote! {
+        // WASM export: called by `infrix test` CLI with random values.
+        #[no_mangle]
+        #fn_vis extern "C" fn #wasm_export_name(fuzz_input: i32) -> i32 {
+            let mut ctx = infrix_sdk::testing::TestContext::new();
+            let inner = |ctx: &mut infrix_sdk::testing::TestContext, value: i32| #fn_body;
+            inner(&mut ctx, fuzz_input);
+            0 // success
+        }
+
+        // `cargo test` runner with a fixed input.
+        #[cfg(test)]
+        #[test]
+        fn #cargo_test_name() {
+            let mut ctx = infrix_sdk::testing::TestContext::new();
+            let inner = |ctx: &mut infrix_sdk::testing::TestContext, value: i32| #fn_body;
+            // Test with a few representative values.
+            for v in [0, 1, -1, 42, i32::MAX, i32::MIN] {
+                inner(&mut ctx, v);
+            }
+        }
+    })
+}

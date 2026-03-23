@@ -54,6 +54,16 @@ pub use infrix_types::{
 };
 
 pub use infrix_macros::{call, contract, contract_impl, event, init, storage_map, view};
+pub use infrix_macros::{infrix_test, infrix_fuzz};
+
+/// Contract testing framework.
+///
+/// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and
+/// the `#[infrix_test]` / `#[infrix_fuzz]` attributes for writing contract
+/// tests that work both in WASM (via `infrix test`) and natively (via
+/// `cargo test`).
+pub mod testing;
+
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -746,7 +756,7 @@ pub mod l0 {
             _ => return None,
         };
 
-        let balance = U256::from_be_bytes(&buffer[1..33]);
+        let balance = U256::from_be_bytes(buffer[1..33].try_into().unwrap_or(&[0u8; 32]));
         let credit_balance = u64::from_be_bytes([
             buffer[33], buffer[34], buffer[35], buffer[36],
             buffer[37], buffer[38], buffer[39], buffer[40],
@@ -932,7 +942,7 @@ pub mod l0 {
         }
 
         let key_book_len = buffer[0] as usize;
-        let key_book = Address::from_bytes(&buffer[1..1 + key_book_len]).ok()?;
+        let key_book = Address::from_bytes(&buffer[1..1 + key_book_len])?;
 
         let offset = 1 + key_book_len;
         let threshold = u64::from_be_bytes([
