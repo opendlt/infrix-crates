@@ -196,3 +196,83 @@ pub fn remove_event_handler(_subscription_id: u64) -> bool {
     // WASM: calls env::remove_event_handler(sub_id) -> bool
     false
 }
+
+// ---- Behavioral Self-Awareness ----
+
+/// Get this contract's call count in the last N blocks.
+///
+/// Useful for rate limiting and detecting anomalous activity spikes.
+///
+/// # Cost
+/// ~200 gas.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::sentient;
+///
+/// let calls = sentient::my_call_count(100);
+/// if calls > 500 {
+///     // Unusual activity — activate circuit breaker.
+///     env::log("circuit breaker activated: too many calls");
+///     return;
+/// }
+/// ```
+pub fn my_call_count(_last_n_blocks: u64) -> u64 {
+    // WASM: calls env::my_call_count(last_n_blocks) -> u64
+    0
+}
+
+/// Get total gas consumed by this contract in the last N blocks.
+///
+/// # Cost
+/// ~300 gas.
+pub fn my_gas_total(_last_n_blocks: u64) -> u64 {
+    // WASM: calls env::my_gas_total(last_n_blocks) -> u64
+    0
+}
+
+/// Get the number of unique callers in the last N blocks.
+///
+/// Useful for detecting Sybil-like patterns or ensuring broad participation.
+///
+/// # Cost
+/// ~300 gas.
+pub fn my_unique_callers(_last_n_blocks: u64) -> u64 {
+    // WASM: calls env::my_unique_callers(last_n_blocks) -> u64
+    0
+}
+
+/// Get the total value transferred out of this contract in the last N blocks.
+///
+/// Critical for implementing circuit breakers that limit outflow velocity.
+///
+/// # Cost
+/// ~400 gas.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::sentient;
+///
+/// let outflow = sentient::my_value_outflow(50);
+/// if outflow > MAX_HOURLY_OUTFLOW {
+///     env::log("circuit breaker: outflow limit exceeded");
+///     return;
+/// }
+/// ```
+pub fn my_value_outflow(_last_n_blocks: u64) -> u64 {
+    // WASM: calls env::my_value_outflow(last_n_blocks) -> u64
+    0
+}
+
+/// Get the most recent error message for this contract.
+///
+/// Returns an empty string if no errors have occurred.
+///
+/// # Cost
+/// ~100 gas.
+pub fn my_last_error() -> String {
+    // WASM: calls env::my_last_error(out_ptr) -> (len, error)
+    String::new()
+}
