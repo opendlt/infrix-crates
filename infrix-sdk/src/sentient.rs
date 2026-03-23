@@ -152,3 +152,47 @@ pub fn cancel_schedule(_callback_id: u64) -> bool {
     // WASM: calls env::cancel_schedule(callback_id) -> bool
     false
 }
+
+// ---- Cross-Contract Event Subscriptions ----
+
+/// Subscribe to events emitted by another contract.
+///
+/// When `source_contract` emits an event matching `event_name`, the runtime
+/// calls `handler` on *this* contract. Use `"*"` for either parameter to
+/// match any source or any event name.
+///
+/// Returns a subscription ID that can be used to unsubscribe.
+///
+/// # Cost
+/// ~500 gas.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::sentient;
+///
+/// // React when the DEX pool emits a Swap event.
+/// let sub_id = sentient::on_event(
+///     "acc://dex.acme/pool",
+///     "ContractCalled:swap",
+///     "on_swap_detected",
+/// );
+///
+/// // Subscribe to all events from any contract.
+/// let global_id = sentient::on_event("*", "*", "on_any_event");
+/// ```
+pub fn on_event(_source_contract: &str, _event_name: &str, _handler: &str) -> u64 {
+    // WASM: calls env::on_event(source_ptr, source_len, event_ptr, event_len, handler_ptr, handler_len) -> u64
+    0
+}
+
+/// Remove an event subscription.
+///
+/// Returns true if the subscription was found and removed.
+///
+/// # Cost
+/// ~100 gas.
+pub fn remove_event_handler(_subscription_id: u64) -> bool {
+    // WASM: calls env::remove_event_handler(sub_id) -> bool
+    false
+}
