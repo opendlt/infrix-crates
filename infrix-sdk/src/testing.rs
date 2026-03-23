@@ -44,6 +44,15 @@ impl ContractRef {
     }
 }
 
+/// A named event emitted during contract execution.
+#[derive(Clone, Debug)]
+pub struct TestEvent {
+    /// Event name.
+    pub name: String,
+    /// Hex-encoded event data.
+    pub data: Vec<u8>,
+}
+
 /// The result of a state-changing contract call.
 #[derive(Clone, Debug)]
 pub struct Receipt {
@@ -59,6 +68,8 @@ pub struct Receipt {
     pub return_data: Option<String>,
     /// Error message (for failed calls).
     pub error: Option<String>,
+    /// Events emitted during the call.
+    pub events: Vec<TestEvent>,
 }
 
 impl Receipt {
@@ -235,6 +246,7 @@ impl TestContext {
                 Some(format!("{}", args[0]))
             },
             error: None,
+            events: Vec::new(),
         }
     }
 
