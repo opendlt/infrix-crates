@@ -60,6 +60,10 @@ pub use infrix_macros::{infrix_test, infrix_fuzz};
 /// self-awareness, and (in future phases) scheduling and simulation.
 pub mod temporal;
 
+/// Shadow State — private-by-default contract execution with transparent
+/// encryption based on visibility policies.
+pub mod shadow;
+
 /// Contract testing framework.
 ///
 /// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and
