@@ -94,3 +94,61 @@ pub fn random_seed() -> [u8; 32] {
     // WASM: calls env::random_seed() -> [32]byte
     [0u8; 32]
 }
+
+// ---- Self-Scheduling ----
+
+/// Schedule a one-time callback at a future block height.
+///
+/// The runtime guarantees execution at or after the target block.
+/// Returns a callback ID that can be used to cancel.
+///
+/// # Cost
+/// ~1000 gas.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::sentient;
+///
+/// // Execute "liquidation_check" in 10 blocks.
+/// let cb_id = sentient::schedule(current_block + 10, "liquidation_check", &[pool_id]);
+/// ```
+pub fn schedule(_target_block: u64, _function: &str, _args: &[u64]) -> u64 {
+    // WASM: calls env::schedule(target_block, fn_ptr, fn_len, args_ptr, args_len) -> u64
+    0
+}
+
+/// Schedule a recurring callback that fires every N blocks.
+///
+/// The callback re-enqueues automatically after each execution.
+/// Set `max_executions` to 0 for infinite repetition.
+///
+/// # Cost
+/// ~2000 gas.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::sentient;
+///
+/// // Update price feed every 5 blocks, forever.
+/// let cb_id = sentient::schedule_recurring(5, "update_price", &[], 0);
+///
+/// // Heartbeat every 100 blocks, at most 1000 times.
+/// let hb_id = sentient::schedule_recurring(100, "heartbeat", &[], 1000);
+/// ```
+pub fn schedule_recurring(_interval_blocks: u64, _function: &str, _args: &[u64], _max_executions: u32) -> u64 {
+    // WASM: calls env::schedule_recurring(interval, fn_ptr, fn_len, args_ptr, args_len, max) -> u64
+    0
+}
+
+/// Cancel a previously scheduled callback (one-time or recurring).
+///
+/// Returns true if the callback was found and cancelled.
+///
+/// # Cost
+/// ~100 gas.
+pub fn cancel_schedule(_callback_id: u64) -> bool {
+    // WASM: calls env::cancel_schedule(callback_id) -> bool
+    false
+}
