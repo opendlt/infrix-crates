@@ -276,3 +276,28 @@ pub fn my_last_error() -> String {
     // WASM: calls env::my_last_error(out_ptr) -> (len, error)
     String::new()
 }
+
+// ---- Quarantine Awareness ----
+
+/// Check if a contract is currently quarantined.
+///
+/// Contracts can use this to avoid calling compromised dependencies.
+/// When a contract is quarantined, all its dependents receive warnings.
+///
+/// # Cost
+/// ~50 gas.
+///
+/// # Example
+///
+/// ```ignore
+/// use infrix_sdk::sentient;
+///
+/// if sentient::is_quarantined("acc://dex.acme/pool") {
+///     env::log("DEX pool is quarantined — aborting swap");
+///     return;
+/// }
+/// ```
+pub fn is_quarantined(_contract_url: &str) -> bool {
+    // WASM: calls env::is_quarantined(url_ptr, url_len) -> bool
+    false
+}
