@@ -67,6 +67,12 @@ pub mod shadow;
 /// Sentient Contracts — native data feeds, timestamps, and randomness.
 pub mod sentient;
 
+/// Shape-Shifting Contracts — adaptive parameter access and shape queries.
+///
+/// Provides type-safe functions to read the currently active shape's
+/// parameters, query shape history, and inspect transition state.
+pub mod shapes;
+
 /// Contract testing framework.
 ///
 /// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and

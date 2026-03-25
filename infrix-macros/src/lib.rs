@@ -1597,3 +1597,49 @@ fn generate_infrix_fuzz(input: ItemFn) -> syn::Result<TokenStream2> {
         }
     })
 }
+
+// =============================================================================
+// Shape-Shifting Contract Macros
+// =============================================================================
+
+mod shapes;
+
+/// Declares shape definitions for a shape-shifting contract.
+///
+/// Applied to an enum where each variant is a shape with `#[infrix::shape(...)]`.
+/// Generates the `infrix:shapes` WASM custom section and type-safe parameter
+/// accessor functions.
+///
+/// # Example
+///
+/// ```ignore
+/// #[infrix::shapes(default = "conservative")]
+/// pub enum Shape {
+///     #[infrix::shape(params(ltv_ratio: u64 = 5000))]
+///     Conservative,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn shapes(attr: TokenStream, item: TokenStream) -> TokenStream {
+    shapes::shapes_impl(attr, item)
+}
+
+/// Declares evolution rules for shape transitions.
+///
+/// Applied to a module containing `#[infrix::rule(...)]` functions.
+#[proc_macro_attribute]
+pub fn evolution_rules(attr: TokenStream, item: TokenStream) -> TokenStream {
+    shapes::evolution_rules_impl(attr, item)
+}
+
+/// Declares a single shape within a `#[infrix::shapes]` enum.
+#[proc_macro_attribute]
+pub fn shape(attr: TokenStream, item: TokenStream) -> TokenStream {
+    shapes::shape_impl(attr, item)
+}
+
+/// Declares a single evolution rule within a rules module.
+#[proc_macro_attribute]
+pub fn rule(attr: TokenStream, item: TokenStream) -> TokenStream {
+    shapes::rule_impl(attr, item)
+}
