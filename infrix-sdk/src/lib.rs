@@ -73,6 +73,13 @@ pub mod sentient;
 /// parameters, query shape history, and inspect transition state.
 pub mod shapes;
 
+/// Swarm Contracts — shared channels, member state, and coordinated actions.
+///
+/// Provides functions for reading/writing the shared communication channel,
+/// querying other members' state, triggering coordinated actions, and
+/// checking the collective immune state.
+pub mod swarm;
+
 /// Contract testing framework.
 ///
 /// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and
