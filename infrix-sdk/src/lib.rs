@@ -80,6 +80,12 @@ pub mod shapes;
 /// checking the collective immune state.
 pub mod swarm;
 
+/// Mission Control — production observability for smart contracts.
+///
+/// Provides host functions for contracts to read their own metrics:
+/// call counts, error rate, gas averages, uptime, anomaly scores, and SLO compliance.
+pub mod mission;
+
 /// Contract testing framework.
 ///
 /// Provides `TestContext`, `Receipt`, `QueryResult`, assertion macros, and
