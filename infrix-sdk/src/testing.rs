@@ -27,6 +27,7 @@
 //! test runner calls. The `TestContext` communicates with the harness via host
 //! function imports (injected by the runner). In unit-test mode (`cargo test`),
 //! the same API uses mock implementations.
+use crate::alloc::{string::{String, ToString}, vec::Vec, format};
 
 /// A reference to a deployed contract within the test harness.
 #[derive(Clone, Debug)]

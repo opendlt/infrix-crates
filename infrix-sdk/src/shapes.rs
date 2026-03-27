@@ -15,6 +15,7 @@
 //! let model: String = shapes::param_string("interest_model");
 //! let current = shapes::current_shape();
 //! ```
+use crate::alloc::{string::{String, ToString}, vec::Vec, format};
 
 #[cfg(target_arch = "wasm32")]
 mod host_shapes {

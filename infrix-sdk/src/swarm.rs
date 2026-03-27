@@ -22,6 +22,7 @@
 //! // List swarm members
 //! let members = swarm::members()?;
 //! ```
+use crate::alloc::{string::{String, ToString}, vec::Vec, format};
 
 /// Swarm error types.
 #[derive(Debug)]
@@ -179,6 +180,7 @@ pub fn coordinate(action: &str, args_json: &[u8]) -> Result<Vec<u8>, SwarmError>
 /// Shared channel operations.
 pub mod channel {
     use super::SwarmError;
+    use crate::alloc::vec::Vec;
 
     /// Read raw bytes from the shared channel.
     pub fn get(key: &str) -> Result<Vec<u8>, SwarmError> {

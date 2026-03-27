@@ -47,6 +47,17 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+// When compiling for no_std + alloc (e.g. wasm32-unknown-unknown),
+// bring core alloc types into scope so all modules can use Vec, String, format! etc.
+#[cfg(feature = "alloc")]
+#[allow(unused_imports)]
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+
 // Re-export infrix_types at crate root so proc macro generated code
 // (which references `infrix_types::X`) can resolve through `use infrix_sdk::prelude::*`.
 pub use infrix_types;

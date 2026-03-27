@@ -17,6 +17,7 @@
 //!     // Activate circuit breaker — unusual activity.
 //! }
 //! ```
+use crate::alloc::{string::{String, ToString}, vec::Vec, format};
 
 /// Result of a historical state query.
 pub struct HistoricalResult {

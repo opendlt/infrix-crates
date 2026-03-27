@@ -17,6 +17,7 @@
 //! let now = sentient::timestamp();
 //! let random = sentient::random_seed();
 //! ```
+use crate::alloc::{string::{String, ToString}, vec::Vec, format};
 
 /// Result of a price feed query.
 pub struct PriceResult {
