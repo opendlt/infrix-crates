@@ -13,7 +13,7 @@ crate-type = ["rlib"]
 
 [features]
 default = ["std"]
-std = ["infrix-types/std"]
+std = ["alloc", "infrix-types/std"]
 alloc = ["infrix-types/alloc"]
 
 [dependencies]

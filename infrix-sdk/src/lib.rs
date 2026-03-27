@@ -47,6 +47,10 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+// Re-export infrix_types at crate root so proc macro generated code
+// (which references `infrix_types::X`) can resolve through `use infrix_sdk::prelude::*`.
+pub use infrix_types;
+
 // Re-export types and macros
 pub use infrix_types::{
     self as types, Address, CallResult, Context, Decode, Encode, Error, Event, EventTrait,
