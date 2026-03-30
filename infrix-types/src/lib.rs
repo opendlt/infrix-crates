@@ -1373,6 +1373,129 @@ impl Hash {
     }
 }
 
+/// Minimal no_std keccak256 implementation (FIPS 202 / SHA-3).
+///
+/// This avoids pulling in an external crate while providing correct function
+/// selectors and event topics.  The implementation follows the Keccak-f[1600]
+/// permutation with the SHA-3/keccak256 parameters (rate=1088, capacity=512,
+/// suffix=0x01).
+pub fn keccak256(input: &[u8]) -> [u8; 32] {
+    const RATE: usize = 136; // 1088 bits / 8
+    let mut state = [0u64; 25];
+
+    // Absorb
+    let mut offset = 0usize;
+    while offset + RATE <= input.len() {
+        for i in 0..(RATE / 8) {
+            let word = u64::from_le_bytes([
+                input[offset + i * 8],
+                input[offset + i * 8 + 1],
+                input[offset + i * 8 + 2],
+                input[offset + i * 8 + 3],
+                input[offset + i * 8 + 4],
+                input[offset + i * 8 + 5],
+                input[offset + i * 8 + 6],
+                input[offset + i * 8 + 7],
+            ]);
+            state[i] ^= word;
+        }
+        keccak_f1600(&mut state);
+        offset += RATE;
+    }
+
+    // Pad last block (keccak uses 0x01 suffix, not SHA-3's 0x06)
+    let mut last_block = [0u8; RATE];
+    let remaining = input.len() - offset;
+    last_block[..remaining].copy_from_slice(&input[offset..]);
+    last_block[remaining] = 0x01;
+    last_block[RATE - 1] |= 0x80;
+
+    for i in 0..(RATE / 8) {
+        let word = u64::from_le_bytes([
+            last_block[i * 8],
+            last_block[i * 8 + 1],
+            last_block[i * 8 + 2],
+            last_block[i * 8 + 3],
+            last_block[i * 8 + 4],
+            last_block[i * 8 + 5],
+            last_block[i * 8 + 6],
+            last_block[i * 8 + 7],
+        ]);
+        state[i] ^= word;
+    }
+    keccak_f1600(&mut state);
+
+    // Squeeze 32 bytes
+    let mut out = [0u8; 32];
+    for i in 0..4 {
+        let bytes = state[i].to_le_bytes();
+        out[i * 8..(i + 1) * 8].copy_from_slice(&bytes);
+    }
+    out
+}
+
+/// Keccak-f[1600] permutation (24 rounds).
+fn keccak_f1600(state: &mut [u64; 25]) {
+    const RC: [u64; 24] = [
+        0x0000000000000001, 0x0000000000008082, 0x800000000000808A,
+        0x8000000080008000, 0x000000000000808B, 0x0000000080000001,
+        0x8000000080008081, 0x8000000000008009, 0x000000000000008A,
+        0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
+        0x000000008000808B, 0x800000000000008B, 0x8000000000008089,
+        0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
+        0x000000000000800A, 0x800000008000000A, 0x8000000080008081,
+        0x8000000000008080, 0x0000000080000001, 0x8000000080008008,
+    ];
+    const ROT: [u32; 24] = [
+        1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 2, 14,
+        27, 41, 56, 8, 25, 43, 62, 18, 39, 61, 20, 44,
+    ];
+    const PI: [usize; 24] = [
+        10, 7, 11, 17, 18, 3, 5, 16, 8, 21, 24, 4,
+        15, 23, 19, 13, 12, 2, 20, 14, 22, 9, 6, 1,
+    ];
+
+    for round in 0..24 {
+        // theta
+        let mut c = [0u64; 5];
+        for x in 0..5 {
+            c[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
+        }
+        let mut d = [0u64; 5];
+        for x in 0..5 {
+            d[x] = c[(x + 4) % 5] ^ c[(x + 1) % 5].rotate_left(1);
+        }
+        for x in 0..5 {
+            for y in 0..5 {
+                state[x + 5 * y] ^= d[x];
+            }
+        }
+
+        // rho and pi
+        let mut current = state[1];
+        for i in 0..24 {
+            let j = PI[i];
+            let temp = state[j];
+            state[j] = current.rotate_left(ROT[i]);
+            current = temp;
+        }
+
+        // chi
+        for y in 0..5 {
+            let mut row = [0u64; 5];
+            for x in 0..5 {
+                row[x] = state[x + 5 * y];
+            }
+            for x in 0..5 {
+                state[x + 5 * y] = row[x] ^ (!row[(x + 1) % 5] & row[(x + 2) % 5]);
+            }
+        }
+
+        // iota
+        state[0] ^= RC[round];
+    }
+}
+
 /// ABI encoding helpers
 pub mod abi {
     use super::*;
@@ -1429,28 +1552,18 @@ pub mod abi {
         *value
     }
 
-    /// Compute function selector (first 4 bytes of keccak256)
+    /// Compute function selector (first 4 bytes of keccak256).
+    ///
+    /// Uses a minimal no_std keccak256 implementation so that selectors are
+    /// computed correctly without requiring an external crate.
     pub fn function_selector(signature: &str) -> [u8; 4] {
-        // For no_std, we'd need an external hash function
-        // This is a placeholder - actual implementation would use keccak256
-        let mut selector = [0u8; 4];
-        let bytes = signature.as_bytes();
-        for (i, &b) in bytes.iter().take(4).enumerate() {
-            selector[i] = b;
-        }
-        selector
+        let hash = keccak256(signature.as_bytes());
+        [hash[0], hash[1], hash[2], hash[3]]
     }
 
-    /// Compute event topic (keccak256 of event signature)
+    /// Compute event topic (keccak256 of event signature).
     pub fn event_topic(signature: &str) -> Topic {
-        // For no_std, we'd need an external hash function
-        // This is a placeholder - actual implementation would use keccak256
-        let mut topic = [0u8; 32];
-        let bytes = signature.as_bytes();
-        for (i, &b) in bytes.iter().take(32).enumerate() {
-            topic[i] = b;
-        }
-        Topic(topic)
+        Topic(keccak256(signature.as_bytes()))
     }
 }
 
