@@ -624,6 +624,12 @@ pub enum Error {
     GovernanceError = 29,
     /// Approval required before execution can proceed
     ApprovalRequired = 30,
+    /// Caller lacks required capability
+    CapabilityDenied = 31,
+    /// Caller lacks required role
+    RoleRequired = 32,
+    /// Policy denied the operation
+    PolicyDenied = 33,
     /// Unknown error
     Unknown = 255,
 }
@@ -663,6 +669,9 @@ impl Error {
             28 => Self::BufferTooSmall,
             29 => Self::GovernanceError,
             30 => Self::ApprovalRequired,
+            31 => Self::CapabilityDenied,
+            32 => Self::RoleRequired,
+            33 => Self::PolicyDenied,
             _ => Self::Unknown,
         }
     }
@@ -717,6 +726,9 @@ impl core::fmt::Display for Error {
             Self::BufferTooSmall => write!(f, "buffer too small"),
             Self::GovernanceError => write!(f, "governance operation failed"),
             Self::ApprovalRequired => write!(f, "approval required"),
+            Self::CapabilityDenied => write!(f, "capability denied"),
+            Self::RoleRequired => write!(f, "role required"),
+            Self::PolicyDenied => write!(f, "policy denied"),
             Self::Unknown => write!(f, "unknown error"),
         }
     }
@@ -1503,6 +1515,12 @@ fn keccak_f1600(state: &mut [u64; 25]) {
         state[0] ^= RC[round];
     }
 }
+
+/// Governance type definitions — intents, plans, outcomes, approvals,
+/// trust profiles, capabilities, roles, settlements, escrows, evidence,
+/// anchors, and disclosures.
+pub mod governance;
+pub use governance::*;
 
 /// ABI encoding helpers
 pub mod abi {
