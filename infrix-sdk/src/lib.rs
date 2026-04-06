@@ -1,6 +1,10 @@
 //! Infrix Smart Contract SDK
 //!
+//! Policy-governed execution and evidence layer for Accumulate.
+//!
 //! This SDK provides all the tools needed to develop smart contracts for the Infrix platform.
+//! Contracts execute as subordinate plugins within the governance pipeline:
+//!   Intent -> Plan -> Approval -> **Execution** -> Outcome -> Evidence -> Anchor
 //!
 //! # Features
 //!
