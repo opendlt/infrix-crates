@@ -620,6 +620,10 @@ pub enum Error {
     DecodingError = 27,
     /// Buffer too small
     BufferTooSmall = 28,
+    /// Governance operation failed
+    GovernanceError = 29,
+    /// Approval required before execution can proceed
+    ApprovalRequired = 30,
     /// Unknown error
     Unknown = 255,
 }
@@ -657,6 +661,8 @@ impl Error {
             26 => Self::EncodingError,
             27 => Self::DecodingError,
             28 => Self::BufferTooSmall,
+            29 => Self::GovernanceError,
+            30 => Self::ApprovalRequired,
             _ => Self::Unknown,
         }
     }
@@ -709,6 +715,8 @@ impl core::fmt::Display for Error {
             Self::EncodingError => write!(f, "encoding error"),
             Self::DecodingError => write!(f, "decoding error"),
             Self::BufferTooSmall => write!(f, "buffer too small"),
+            Self::GovernanceError => write!(f, "governance operation failed"),
+            Self::ApprovalRequired => write!(f, "approval required"),
             Self::Unknown => write!(f, "unknown error"),
         }
     }

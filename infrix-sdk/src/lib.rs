@@ -95,6 +95,11 @@ pub mod shapes;
 /// checking the collective immune state.
 pub mod swarm;
 
+/// Governance module — intent submission, object management, approvals,
+/// trust evaluation, capability/role management, and evidence access
+/// from within smart contracts.
+pub mod governance;
+
 /// Mission Control — production observability for smart contracts.
 ///
 /// Provides host functions for contracts to read their own metrics:
@@ -122,6 +127,7 @@ pub mod prelude {
     pub use crate::crypto;
     pub use crate::env;
     pub use crate::events;
+    pub use crate::governance;
     pub use crate::l0;
     pub use crate::storage;
 }
@@ -189,6 +195,95 @@ mod host {
         pub fn host_log(msg_ptr: *const u8, msg_len: u32);
         pub fn host_revert(msg_ptr: *const u8, msg_len: u32) -> !;
         pub fn host_assert(condition: i32, msg_ptr: *const u8, msg_len: u32);
+
+        // === Governance Host Functions ===
+
+        // Intent operations
+        pub fn host_governance_submit_intent(
+            goal_ptr: *const u8, goal_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+        pub fn host_governance_get_intent_status(
+            intent_id_ptr: *const u8, intent_id_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+
+        // Object operations
+        pub fn host_governance_create_object(
+            obj_type_ptr: *const u8, obj_type_len: u32,
+            fields_ptr: *const u8, fields_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+        pub fn host_governance_get_object(
+            obj_type_ptr: *const u8, obj_type_len: u32,
+            id_ptr: *const u8, id_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+        pub fn host_governance_transition_object(
+            obj_type_ptr: *const u8, obj_type_len: u32,
+            id_ptr: *const u8, id_len: u32,
+            state_ptr: *const u8, state_len: u32
+        ) -> i32;
+
+        // Approval operations
+        pub fn host_governance_require_approval(
+            role_ptr: *const u8, role_len: u32,
+            threshold: u32
+        ) -> i32;
+        pub fn host_governance_check_approval(
+            plan_id_ptr: *const u8, plan_id_len: u32
+        ) -> i32;
+
+        // Trust operations
+        pub fn host_governance_get_trust_profile(
+            profile_id_ptr: *const u8, profile_id_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+        pub fn host_governance_evaluate_trust(
+            profile_id_ptr: *const u8, profile_id_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+
+        // Capability operations
+        pub fn host_governance_has_capability(
+            identity_ptr: *const u8, identity_len: u32,
+            cap_ptr: *const u8, cap_len: u32
+        ) -> i32;
+        pub fn host_governance_grant_capability(
+            grantee_ptr: *const u8, grantee_len: u32,
+            caps_ptr: *const u8, caps_len: u32,
+            scope_ptr: *const u8, scope_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+        pub fn host_governance_revoke_capability(
+            grant_id_ptr: *const u8, grant_id_len: u32
+        ) -> i32;
+
+        // Role operations
+        pub fn host_governance_has_role(
+            identity_ptr: *const u8, identity_len: u32,
+            role_ptr: *const u8, role_len: u32
+        ) -> i32;
+        pub fn host_governance_assign_role(
+            identity_ptr: *const u8, identity_len: u32,
+            role_ptr: *const u8, role_len: u32,
+            scope_ptr: *const u8, scope_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+
+        // Evidence operations
+        pub fn host_governance_get_evidence(
+            intent_id_ptr: *const u8, intent_id_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
+
+        // Policy operations
+        pub fn host_governance_evaluate_policy(
+            scope_ptr: *const u8, scope_len: u32,
+            op_type_ptr: *const u8, op_type_len: u32,
+            operands_ptr: *const u8, operands_len: u32,
+            output_ptr: *mut u8
+        ) -> i32;
     }
 }
 
@@ -467,6 +562,24 @@ mod host {
             host_revert(msg_ptr, msg_len);
         }
     }
+
+    // Governance host function mocks
+    pub unsafe fn host_governance_submit_intent(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_get_intent_status(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_create_object(_: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_get_object(_: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_transition_object(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32) -> i32 { -1 }
+    pub unsafe fn host_governance_require_approval(_: *const u8, _: u32, _: u32) -> i32 { -1 }
+    pub unsafe fn host_governance_check_approval(_: *const u8, _: u32) -> i32 { -1 }
+    pub unsafe fn host_governance_get_trust_profile(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_evaluate_trust(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_has_capability(_: *const u8, _: u32, _: *const u8, _: u32) -> i32 { 0 }
+    pub unsafe fn host_governance_grant_capability(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_revoke_capability(_: *const u8, _: u32) -> i32 { -1 }
+    pub unsafe fn host_governance_has_role(_: *const u8, _: u32, _: *const u8, _: u32) -> i32 { 0 }
+    pub unsafe fn host_governance_assign_role(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_get_evidence(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_evaluate_policy(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
 }
 
 // =============================================================================
