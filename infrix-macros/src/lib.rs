@@ -62,8 +62,10 @@ use syn::{
     punctuated::Punctuated,
     spanned::Spanned,
     Attribute, Block, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct,
-    Lit, Meta, Pat, PatType, ReturnType, Signature, Token, Type, Visibility,
+    Lit, LitInt, LitStr, Meta, Pat, PatType, ReturnType, Signature, Token, Type, Visibility,
 };
+
+mod governance_macros;
 
 /// Marks a struct as an Infrix smart contract.
 ///
@@ -1631,4 +1633,136 @@ pub fn shape(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn rule(attr: TokenStream, item: TokenStream) -> TokenStream {
     shapes::rule_impl(attr, item)
+}
+
+// =============================================================================
+// Governance Macros
+// =============================================================================
+
+/// Require the caller to have a specific role.
+///
+/// Reverts with `Error::RoleRequired` if the check fails.
+///
+/// # Example
+/// ```ignore
+/// #[require_role("admin")]
+/// pub fn admin_only(&self) -> Result<(), Error> { Ok(()) }
+/// ```
+#[proc_macro_attribute]
+pub fn require_role(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let role = parse_macro_input!(attr as LitStr);
+    let input = parse_macro_input!(item as ItemFn);
+    governance_macros::generate_require_role(&role.value(), &input).into()
+}
+
+/// Require the caller to have a specific capability.
+///
+/// Reverts with `Error::CapabilityDenied` if the check fails.
+///
+/// # Example
+/// ```ignore
+/// #[require_capability("token:transfer")]
+/// pub fn transfer(&mut self, to: Address, amount: U256) -> Result<(), Error> { Ok(()) }
+/// ```
+#[proc_macro_attribute]
+pub fn require_capability(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let cap = parse_macro_input!(attr as LitStr);
+    let input = parse_macro_input!(item as ItemFn);
+    governance_macros::generate_require_capability(&cap.value(), &input).into()
+}
+
+/// Require multi-party approval before execution.
+///
+/// # Attributes
+/// - `threshold = N` (required): number of approvals needed
+/// - `role = "..."` (optional): specific role required for approvers
+///
+/// # Example
+/// ```ignore
+/// #[require_approval(threshold = 2)]
+/// pub fn withdraw(&mut self, amount: U256) -> Result<(), Error> { Ok(()) }
+///
+/// #[require_approval(threshold = 3, role = "board_member")]
+/// pub fn dissolve(&mut self) -> Result<(), Error> { Ok(()) }
+/// ```
+#[proc_macro_attribute]
+pub fn require_approval(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as ApprovalArgs);
+    let input = parse_macro_input!(item as ItemFn);
+    governance_macros::generate_require_approval(
+        args.threshold,
+        args.role.as_deref(),
+        &input,
+    ).into()
+}
+
+/// Route function execution through the intent pipeline.
+///
+/// When called outside a governed execution context, the function
+/// submits an intent instead of executing directly.
+///
+/// # Example
+/// ```ignore
+/// #[governed]
+/// pub fn large_transfer(&mut self, to: Address, amount: U256) -> Result<(), Error> {
+///     // body becomes the execution target of an intent
+///     Ok(())
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn governed(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+    governance_macros::generate_governed(&input).into()
+}
+
+/// Automatically generate evidence links for function execution.
+///
+/// Wraps the function so that an evidence event is emitted after
+/// execution completes (whether success or failure).
+///
+/// # Example
+/// ```ignore
+/// #[evidenced]
+/// pub fn sensitive_operation(&mut self) -> Result<(), Error> { Ok(()) }
+/// ```
+#[proc_macro_attribute]
+pub fn evidenced(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+    governance_macros::generate_evidenced(&input).into()
+}
+
+/// Helper struct for parsing `#[require_approval(...)]` attributes.
+struct ApprovalArgs {
+    threshold: u32,
+    role: Option<String>,
+}
+
+impl Parse for ApprovalArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut threshold = 1u32;
+        let mut role = None;
+
+        while !input.is_empty() {
+            let ident: Ident = input.parse()?;
+            input.parse::<Token![=]>()?;
+
+            match ident.to_string().as_str() {
+                "threshold" => {
+                    let lit: LitInt = input.parse()?;
+                    threshold = lit.base10_parse()?;
+                }
+                "role" => {
+                    let lit: LitStr = input.parse()?;
+                    role = Some(lit.value());
+                }
+                _ => return Err(syn::Error::new(ident.span(), "unknown attribute")),
+            }
+
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(ApprovalArgs { threshold, role })
+    }
 }

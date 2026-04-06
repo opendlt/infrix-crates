@@ -70,6 +70,7 @@ pub use infrix_types::{
 
 pub use infrix_macros::{call, contract, contract_impl, event, init, storage_map, view};
 pub use infrix_macros::{infrix_test, infrix_fuzz};
+pub use infrix_macros::{require_role, require_capability, require_approval, governed, evidenced};
 
 /// Programmable Time — temporal primitives for historical queries,
 /// self-awareness, and (in future phases) scheduling and simulation.
@@ -123,6 +124,7 @@ pub mod prelude {
     };
 
     pub use crate::{call, contract, contract_impl, event, init, storage_map, view};
+    pub use crate::{require_role, require_capability, require_approval, governed, evidenced};
 
     pub use crate::crypto;
     pub use crate::env;
