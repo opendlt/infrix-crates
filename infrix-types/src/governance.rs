@@ -35,6 +35,30 @@ pub enum IntentGoalType {
     EscrowCreate,
     ObjectTransition,
     PolicyChange,
+    ContractUpgrade,
+    PatchPropagation,
+    RevertTransaction,
+    SettlementNetting,
+    RoleAssign,
+    RoleRevoke,
+    RoleSuspend,
+    RoleEmergency,
+    DisclosureGrant,
+    DisclosureRevoke,
+    ContractDeploy,
+    ContractCall,
+    SwarmCreate,
+    SwarmJoin,
+    SwarmCoordinate,
+    SwarmDissolve,
+    ShapeTransition,
+    BridgeSend,
+    BridgeReceive,
+    CapabilityRevoke,
+    PolicyUnbind,
+    AnchorForce,
+    TrustProfileCreate,
+    TrustProfileUpdate,
 }
 
 /// The desired outcome of an intent.
@@ -121,11 +145,25 @@ pub struct ExecutionPlan {
     pub compensation_plan: Vec<PlanStep>,
 }
 
+/// Canonical spine stages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpineStage {
+    Intent,
+    Plan,
+    Approval,
+    Execution,
+    Outcome,
+    Evidence,
+    Anchor,
+}
+
 /// A single step in the execution plan.
 #[derive(Clone, Debug)]
 pub struct PlanStep {
     pub stage_id: String,
     pub stage_name: String,
+    /// Canonical spine stage this step represents.
+    pub spine_stage: SpineStage,
     pub step_type: PlanStepType,
     pub description: String,
     pub gas_estimate: u64,
@@ -135,13 +173,24 @@ pub struct PlanStep {
     pub expected_output: Option<String>,
 }
 
-/// Plan step types.
+/// Plan step types matching Go PlanStepType constants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlanStepType {
     ContractCall,
     ContractDeploy,
     ObjectCreate,
+    ObjectMutate,
     ObjectTransition,
+    PolicyCheck,
+    ApprovalGate,
+    Settlement,
+    BridgeAction,
+    ExternalProof,
+    Wait,
+    Compensate,
+    SwarmAction,
+    Anchor,
+    // Legacy/extended types retained for SDK completeness.
     SettlementLeg,
     EscrowCreate,
     EscrowRelease,
@@ -154,7 +203,6 @@ pub enum PlanStepType {
     EvidenceAnchor,
     L0Transfer,
     L0DataWrite,
-    ExternalProof,
     Compensation,
 }
 
@@ -171,6 +219,17 @@ pub struct PlanApprovalReq {
 // Outcome Types
 // =============================================================================
 
+/// Outcome finality states.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutcomeFinality {
+    Provisional,
+    LocallyFinal,
+    ExternalContingent,
+    Compensated,
+    Disputed,
+    L0AnchoredFinal,
+}
+
 /// Post-execution outcome record.
 #[derive(Clone, Debug)]
 pub struct OutcomeRecord {
@@ -184,6 +243,8 @@ pub struct OutcomeRecord {
     pub drift_analysis: Option<DriftAnalysis>,
     pub outcome_hash: [u8; 32],
     pub plan_hash_verified: bool,
+    /// Finality state of this outcome.
+    pub finality: OutcomeFinality,
 }
 
 /// Actual result for a single plan step.
@@ -440,4 +501,59 @@ pub struct ApprovalRef {
     pub role: String,
     pub plan_hash: [u8; 32],
     pub signed_at: String,
+}
+
+// =============================================================================
+// Gap 15: Cross-cutting governance types
+// =============================================================================
+
+/// Anchor class — classifies the anchoring treatment for an artifact type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnchorClass {
+    NoAnchor,
+    DigestOnly,
+    Batch,
+    Full,
+}
+
+/// Privacy class — disclosure privacy classification for object fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrivacyClass {
+    Public,
+    Internal,
+    Confidential,
+    Restricted,
+    Secret,
+}
+
+/// Settlement method — how value is moved in a settlement instruction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SettlementMethod {
+    Atomic,
+    Phased,
+    Netting,
+    Bridge,
+    Escrow,
+}
+
+/// Execution family — the category of execution runtime for a plan step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecutionFamily {
+    Wasm,
+    RulePack,
+    WorkflowNative,
+    VerifierPlugin,
+    ExternalAdapter,
+    AgentModule,
+    Confidential,
+}
+
+/// Trust response action — deterministic downstream effect of trust drift.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TrustResponseAction {
+    PausePlan,
+    InvalidateApproval,
+    DowngradeEvidence,
+    BlockFinality,
+    Fallback,
 }
