@@ -555,5 +555,4 @@ pub enum TrustResponseAction {
     InvalidateApproval,
     DowngradeEvidence,
     BlockFinality,
-    Fallback,
 }
