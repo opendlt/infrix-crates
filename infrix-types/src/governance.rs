@@ -43,6 +43,7 @@ pub enum IntentGoalType {
     RoleRevoke,
     RoleSuspend,
     RoleEmergency,
+    RoleNormalize,
     DisclosureGrant,
     DisclosureRevoke,
     ContractDeploy,
@@ -524,24 +525,37 @@ pub enum PrivacyClass {
     Confidential,
     Restricted,
     Secret,
+    NeverDisclosable,
+    ZkpOnly,
 }
 
 /// Settlement method — how value is moved in a settlement instruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettlementMethod {
     Atomic,
+    Dvp,
     Phased,
     Netting,
     Bridge,
     Escrow,
+    Regulated,
 }
 
 /// Execution family — the category of execution runtime for a plan step.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExecutionFamily {
     Wasm,
+    ObjectOp,
+    Settlement,
+    Bridge,
+    ApprovalGate,
+    PolicyCheck,
+    DisclosureAction,
+    SwarmAction,
+    Anchor,
+    Wait,
+    ExternalProof,
     RulePack,
-    WorkflowNative,
     VerifierPlugin,
     ExternalAdapter,
     AgentModule,
