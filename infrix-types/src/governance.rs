@@ -11,7 +11,15 @@ use alloc::{string::String, vec::Vec};
 // Intent Types
 // =============================================================================
 
-/// Intent goal type categories.
+/// Intent goal type categories. MUST stay in perfect parity with the
+/// Go source of truth (`pkg/intent/types.go`'s `Goal*` constants and
+/// `ValidGoalTypes`). The mediator dispatches by exact wire string,
+/// returned here by `as_str()`. Drift is fenced by
+/// `pkg/intent/sdk_goal_parity_test.go::TestSDKGoalParity_Rust`.
+///
+/// `Transfer` and `EscrowCreate` were removed in Gap 13 first-pass —
+/// single-leg transfers and escrow creation now route through
+/// `Settlement` with the appropriate method.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntentGoalType {
     Convert,
@@ -25,20 +33,18 @@ pub enum IntentGoalType {
     Custom,
     ObjectCreate,
     ObjectMutate,
-    Transfer,
     PolicyBind,
     CapabilityGrant,
     WorkflowStart,
     CredentialIssue,
     VaultCreate,
     Settlement,
-    EscrowCreate,
+    SettlementNetting,
     ObjectTransition,
     PolicyChange,
     ContractUpgrade,
     PatchPropagation,
     RevertTransaction,
-    SettlementNetting,
     RoleAssign,
     RoleRevoke,
     RoleSuspend,
@@ -60,6 +66,93 @@ pub enum IntentGoalType {
     AnchorForce,
     TrustProfileCreate,
     TrustProfileUpdate,
+    BootstrapRole,
+    SystemAnchorPeriodic,
+    ApprovalInvalidate,
+    RoleExpire,
+    CapabilityExpire,
+    SponsorRegister,
+    SponsorUpdate,
+    SponsorRevoke,
+    SponsorPause,
+    SponsorResume,
+    DisputeResolve,
+    RulePackEval,
+    VerifierRun,
+    ExternalAdapterCall,
+    AgentRun,
+    ConfidentialExec,
+}
+
+impl IntentGoalType {
+    /// Returns the canonical wire-format string for this goal type.
+    /// Matches the string values declared in `pkg/intent/types.go`
+    /// exactly. The Gap 15 cross-SDK parity fence parses these
+    /// literals to verify there is no drift.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IntentGoalType::Convert => "CONVERT",
+            IntentGoalType::EarnYield => "EARN_YIELD",
+            IntentGoalType::Borrow => "BORROW",
+            IntentGoalType::ProvideLiquidity => "PROVIDE_LIQUIDITY",
+            IntentGoalType::Swap => "SWAP",
+            IntentGoalType::Stake => "STAKE",
+            IntentGoalType::Bridge => "BRIDGE",
+            IntentGoalType::Compound => "COMPOUND",
+            IntentGoalType::Custom => "CUSTOM",
+            IntentGoalType::ObjectCreate => "OBJECT_CREATE",
+            IntentGoalType::ObjectMutate => "OBJECT_MUTATE",
+            IntentGoalType::PolicyBind => "POLICY_BIND",
+            IntentGoalType::CapabilityGrant => "CAPABILITY_GRANT",
+            IntentGoalType::WorkflowStart => "WORKFLOW_START",
+            IntentGoalType::CredentialIssue => "CREDENTIAL_ISSUE",
+            IntentGoalType::VaultCreate => "VAULT_CREATE",
+            IntentGoalType::Settlement => "SETTLEMENT",
+            IntentGoalType::SettlementNetting => "SETTLEMENT_NETTING",
+            IntentGoalType::ObjectTransition => "OBJECT_TRANSITION",
+            IntentGoalType::PolicyChange => "POLICY_CHANGE",
+            IntentGoalType::ContractUpgrade => "CONTRACT_UPGRADE",
+            IntentGoalType::PatchPropagation => "PATCH_PROPAGATION",
+            IntentGoalType::RevertTransaction => "REVERT_TRANSACTION",
+            IntentGoalType::RoleAssign => "ROLE_ASSIGN",
+            IntentGoalType::RoleRevoke => "ROLE_REVOKE",
+            IntentGoalType::RoleSuspend => "ROLE_SUSPEND",
+            IntentGoalType::RoleEmergency => "ROLE_EMERGENCY",
+            IntentGoalType::RoleNormalize => "ROLE_NORMALIZE",
+            IntentGoalType::DisclosureGrant => "DISCLOSURE_GRANT",
+            IntentGoalType::DisclosureRevoke => "DISCLOSURE_REVOKE",
+            IntentGoalType::ContractDeploy => "CONTRACT_DEPLOY",
+            IntentGoalType::ContractCall => "CONTRACT_CALL",
+            IntentGoalType::SwarmCreate => "SWARM_CREATE",
+            IntentGoalType::SwarmJoin => "SWARM_JOIN",
+            IntentGoalType::SwarmCoordinate => "SWARM_COORDINATE",
+            IntentGoalType::SwarmDissolve => "SWARM_DISSOLVE",
+            IntentGoalType::ShapeTransition => "SHAPE_TRANSITION",
+            IntentGoalType::BridgeSend => "BRIDGE_SEND",
+            IntentGoalType::BridgeReceive => "BRIDGE_RECEIVE",
+            IntentGoalType::CapabilityRevoke => "CAPABILITY_REVOKE",
+            IntentGoalType::PolicyUnbind => "POLICY_UNBIND",
+            IntentGoalType::AnchorForce => "ANCHOR_FORCE",
+            IntentGoalType::TrustProfileCreate => "TRUST_PROFILE_CREATE",
+            IntentGoalType::TrustProfileUpdate => "TRUST_PROFILE_UPDATE",
+            IntentGoalType::BootstrapRole => "BOOTSTRAP_ROLE",
+            IntentGoalType::SystemAnchorPeriodic => "SYSTEM_ANCHOR_PERIODIC",
+            IntentGoalType::ApprovalInvalidate => "APPROVAL_INVALIDATE",
+            IntentGoalType::RoleExpire => "ROLE_EXPIRE",
+            IntentGoalType::CapabilityExpire => "CAPABILITY_EXPIRE",
+            IntentGoalType::SponsorRegister => "SPONSOR_REGISTER",
+            IntentGoalType::SponsorUpdate => "SPONSOR_UPDATE",
+            IntentGoalType::SponsorRevoke => "SPONSOR_REVOKE",
+            IntentGoalType::SponsorPause => "SPONSOR_PAUSE",
+            IntentGoalType::SponsorResume => "SPONSOR_RESUME",
+            IntentGoalType::DisputeResolve => "DISPUTE_RESOLVE",
+            IntentGoalType::RulePackEval => "RULE_PACK_EVAL",
+            IntentGoalType::VerifierRun => "VERIFIER_RUN",
+            IntentGoalType::ExternalAdapterCall => "EXTERNAL_ADAPTER_CALL",
+            IntentGoalType::AgentRun => "AGENT_RUN",
+            IntentGoalType::ConfidentialExec => "CONFIDENTIAL_EXEC",
+        }
+    }
 }
 
 /// The desired outcome of an intent.
