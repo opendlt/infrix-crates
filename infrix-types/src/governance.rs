@@ -82,6 +82,7 @@ pub enum IntentGoalType {
     ExternalAdapterCall,
     AgentRun,
     ConfidentialExec,
+    SubsystemAction,
 }
 
 impl IntentGoalType {
@@ -151,6 +152,7 @@ impl IntentGoalType {
             IntentGoalType::ExternalAdapterCall => "EXTERNAL_ADAPTER_CALL",
             IntentGoalType::AgentRun => "AGENT_RUN",
             IntentGoalType::ConfidentialExec => "CONFIDENTIAL_EXEC",
+            IntentGoalType::SubsystemAction => "SUBSYSTEM_ACTION",
         }
     }
 }
