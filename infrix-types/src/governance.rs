@@ -83,6 +83,9 @@ pub enum IntentGoalType {
     AgentRun,
     ConfidentialExec,
     SubsystemAction,
+    /// Spec §5.3 plugin upgrade lifecycle. Mints a CompatibilityReport
+    /// sized by RiskClass that drives the approval requirement.
+    PluginUpgrade,
 }
 
 impl IntentGoalType {
@@ -153,6 +156,7 @@ impl IntentGoalType {
             IntentGoalType::AgentRun => "AGENT_RUN",
             IntentGoalType::ConfidentialExec => "CONFIDENTIAL_EXEC",
             IntentGoalType::SubsystemAction => "SUBSYSTEM_ACTION",
+            IntentGoalType::PluginUpgrade => "PLUGIN_UPGRADE",
         }
     }
 }
