@@ -87,6 +87,12 @@ pub enum IntentGoalType {
     /// sized by RiskClass that drives the approval requirement.
     PluginUpgrade,
     PluginRegister,
+    /// G-24 closed-loop operational controls. Both controllers
+    /// (GasController, RateLimitController) propose typed governance
+    /// intents that adjust operational parameters; direct in-memory
+    /// mutation is forbidden.
+    GasScheduleUpdate,
+    RateLimitUpdate,
 }
 
 impl IntentGoalType {
@@ -159,6 +165,8 @@ impl IntentGoalType {
             IntentGoalType::SubsystemAction => "SUBSYSTEM_ACTION",
             IntentGoalType::PluginUpgrade => "PLUGIN_UPGRADE",
             IntentGoalType::PluginRegister => "PLUGIN_REGISTER",
+            IntentGoalType::GasScheduleUpdate => "GAS_SCHEDULE_UPDATE",
+            IntentGoalType::RateLimitUpdate => "RATE_LIMIT_UPDATE",
         }
     }
 }
