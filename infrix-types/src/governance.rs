@@ -93,6 +93,12 @@ pub enum IntentGoalType {
     /// mutation is forbidden.
     GasScheduleUpdate,
     RateLimitUpdate,
+    /// G-25 phase 1c — operator-initiated session-key delegation.
+    /// The wallet's hardware key authorizes a freshly-generated
+    /// ED25519 session key with a narrowly-scoped capability
+    /// (Purpose=approval, WorkflowStageScope=current_session,
+    /// ExpiresAt ≤ now+1h).
+    SessionKeyDelegate,
 }
 
 impl IntentGoalType {
@@ -167,6 +173,7 @@ impl IntentGoalType {
             IntentGoalType::PluginRegister => "PLUGIN_REGISTER",
             IntentGoalType::GasScheduleUpdate => "GAS_SCHEDULE_UPDATE",
             IntentGoalType::RateLimitUpdate => "RATE_LIMIT_UPDATE",
+            IntentGoalType::SessionKeyDelegate => "SESSION_KEY_DELEGATE",
         }
     }
 }
