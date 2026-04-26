@@ -86,6 +86,7 @@ pub enum IntentGoalType {
     /// Spec §5.3 plugin upgrade lifecycle. Mints a CompatibilityReport
     /// sized by RiskClass that drives the approval requirement.
     PluginUpgrade,
+    PluginRegister,
 }
 
 impl IntentGoalType {
@@ -157,6 +158,7 @@ impl IntentGoalType {
             IntentGoalType::ConfidentialExec => "CONFIDENTIAL_EXEC",
             IntentGoalType::SubsystemAction => "SUBSYSTEM_ACTION",
             IntentGoalType::PluginUpgrade => "PLUGIN_UPGRADE",
+            IntentGoalType::PluginRegister => "PLUGIN_REGISTER",
         }
     }
 }
