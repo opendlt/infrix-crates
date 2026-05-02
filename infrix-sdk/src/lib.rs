@@ -468,60 +468,145 @@ mod host {
         // No-op in mock
     }
 
+    // P0-003 (2026-05-02): the std/test host crypto mocks now compute
+    // real digests + verify real signatures rather than zeroing
+    // outputs and unconditionally returning 1. Pre-closure, every
+    // mock returned all-zero hashes and "valid" for every signature
+    // — a failure mode that trained contract authors into unsafe
+    // assumptions (the test-mode path could never catch a bad
+    // signature or a wrong digest). The mocks below now match the
+    // wasm32 host's contract on the non-wasm32 (test) target.
+    //
+    // wasm32 builds keep the extern "C" host imports defined above;
+    // operators wire real implementations on the host side.
+
+    use sha2::{Digest as _, Sha256};
+    use sha3::{Keccak256, Sha3_256};
+    use blake2::{Blake2b, digest::consts::U32};
+    use ripemd::Ripemd160;
+    use ed25519_dalek::{Signature as Ed25519Signature, Verifier as _, VerifyingKey as Ed25519VerifyingKey};
+    use k256::ecdsa::{
+        signature::hazmat::PrehashVerifier as _,
+        RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey,
+    };
+
     pub unsafe fn host_crypto_sha256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8) {
-        // Simple mock - just zero the output
-        // In real implementation, would compute actual SHA256
-        let _ = (data_ptr, data_len);
-        for i in 0..32 {
-            *output_ptr.add(i) = 0;
-        }
+        let data = core::slice::from_raw_parts(data_ptr, data_len as usize);
+        let digest = Sha256::digest(data);
+        core::ptr::copy_nonoverlapping(digest.as_ptr(), output_ptr, 32);
     }
 
     pub unsafe fn host_crypto_sha3_256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8) {
-        let _ = (data_ptr, data_len);
-        for i in 0..32 {
-            *output_ptr.add(i) = 0;
-        }
+        let data = core::slice::from_raw_parts(data_ptr, data_len as usize);
+        let digest = Sha3_256::digest(data);
+        core::ptr::copy_nonoverlapping(digest.as_ptr(), output_ptr, 32);
     }
 
     pub unsafe fn host_crypto_keccak256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8) {
-        let _ = (data_ptr, data_len);
-        for i in 0..32 {
-            *output_ptr.add(i) = 0;
-        }
+        let data = core::slice::from_raw_parts(data_ptr, data_len as usize);
+        let digest = Keccak256::digest(data);
+        core::ptr::copy_nonoverlapping(digest.as_ptr(), output_ptr, 32);
     }
 
     pub unsafe fn host_crypto_blake2b_256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8) {
-        let _ = (data_ptr, data_len);
-        for i in 0..32 {
-            *output_ptr.add(i) = 0;
-        }
+        let data = core::slice::from_raw_parts(data_ptr, data_len as usize);
+        let mut hasher = Blake2b::<U32>::new();
+        hasher.update(data);
+        let digest = hasher.finalize();
+        core::ptr::copy_nonoverlapping(digest.as_ptr(), output_ptr, 32);
     }
 
     pub unsafe fn host_crypto_ripemd160(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8) {
-        let _ = (data_ptr, data_len);
-        for i in 0..20 {
-            *output_ptr.add(i) = 0;
+        let data = core::slice::from_raw_parts(data_ptr, data_len as usize);
+        let digest = Ripemd160::digest(data);
+        core::ptr::copy_nonoverlapping(digest.as_ptr(), output_ptr, 20);
+    }
+
+    pub unsafe fn host_crypto_ed25519_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32 {
+        let msg = core::slice::from_raw_parts(msg_ptr, msg_len as usize);
+        let sig_bytes = core::slice::from_raw_parts(sig_ptr, 64);
+        let pubkey_bytes = core::slice::from_raw_parts(pubkey_ptr, 32);
+        let mut pubkey_arr = [0u8; 32];
+        pubkey_arr.copy_from_slice(pubkey_bytes);
+        let verifying_key = match Ed25519VerifyingKey::from_bytes(&pubkey_arr) {
+            Ok(k) => k,
+            Err(_) => return 0,
+        };
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(sig_bytes);
+        let signature = Ed25519Signature::from_bytes(&sig_arr);
+        match verifying_key.verify(msg, &signature) {
+            Ok(()) => 1,
+            Err(_) => 0,
         }
     }
 
-    pub unsafe fn host_crypto_ed25519_verify(_msg_ptr: *const u8, _msg_len: u32, _sig_ptr: *const u8, _pubkey_ptr: *const u8) -> i32 {
-        1 // Valid in mock
-    }
-
-    pub unsafe fn host_crypto_secp256k1_verify(_msg_ptr: *const u8, _msg_len: u32, _sig_ptr: *const u8, _pubkey_ptr: *const u8) -> i32 {
-        1
-    }
-
-    pub unsafe fn host_crypto_secp256k1_recover(_msg_ptr: *const u8, _msg_len: u32, _sig_ptr: *const u8, _recovery_id: u8, output_ptr: *mut u8) -> i32 {
-        for i in 0..65 {
-            *output_ptr.add(i) = 0;
+    pub unsafe fn host_crypto_secp256k1_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32 {
+        // The secp256k1 verify contract takes the canonical 32-byte
+        // message digest the caller has already produced (matches the
+        // wasm host contract — host_crypto_secp256k1_verify hashes are
+        // the caller's responsibility). When msg_len != 32 we fail
+        // closed rather than silently rehashing.
+        if msg_len != 32 {
+            return 0;
         }
+        let msg = core::slice::from_raw_parts(msg_ptr, 32);
+        let sig_bytes = core::slice::from_raw_parts(sig_ptr, 64);
+        let pubkey_bytes = core::slice::from_raw_parts(pubkey_ptr, 33);
+
+        let signature = match K256Signature::from_slice(sig_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let verifying_key = match K256VerifyingKey::from_sec1_bytes(pubkey_bytes) {
+            Ok(k) => k,
+            Err(_) => return 0,
+        };
+        match verifying_key.verify_prehash(msg, &signature) {
+            Ok(()) => 1,
+            Err(_) => 0,
+        }
+    }
+
+    pub unsafe fn host_crypto_secp256k1_recover(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, recovery_id: u8, output_ptr: *mut u8) -> i32 {
+        // Like verify, the caller supplies the pre-hashed 32-byte
+        // digest. Output is the canonical 65-byte uncompressed SEC1
+        // public key (0x04 || X || Y).
+        if msg_len != 32 {
+            return -1;
+        }
+        let msg = core::slice::from_raw_parts(msg_ptr, 32);
+        let sig_bytes = core::slice::from_raw_parts(sig_ptr, 64);
+
+        let signature = match K256Signature::from_slice(sig_bytes) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        let recid = match RecoveryId::try_from(recovery_id) {
+            Ok(r) => r,
+            Err(_) => return -1,
+        };
+        let recovered = match K256VerifyingKey::recover_from_prehash(msg, &signature, recid) {
+            Ok(k) => k,
+            Err(_) => return -1,
+        };
+        let encoded = recovered.to_encoded_point(false);
+        let bytes = encoded.as_bytes();
+        if bytes.len() != 65 {
+            return -1;
+        }
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), output_ptr, 65);
         65
     }
 
     pub unsafe fn host_crypto_bls12_381_verify(_msg_ptr: *const u8, _msg_len: u32, _sig_ptr: *const u8, _pubkey_ptr: *const u8) -> i32 {
-        1
+        // P0-003 documented error path: the std/test mock host does
+        // NOT verify BLS12-381 signatures. Returning 0 (invalid) is
+        // the fail-closed posture every other host crypto mock now
+        // follows on bad input — the test surface refuses to produce
+        // an unconditional "valid" verdict. wasm32 builds reach a
+        // real BLS12-381 verifier through the host import.
+        0
     }
 
     pub unsafe fn host_call_contract(_address_ptr: *const u8, _address_len: u32, _input_ptr: *const u8, _input_len: u32, _output_ptr: *mut u8) -> i32 {
@@ -1784,11 +1869,241 @@ mod tests {
         let _ = env::value();
     }
 
+    // P0-003 (2026-05-02): the std/test host crypto mock now computes
+    // real digests. The known-answer vectors below are taken from the
+    // canonical test suites for each algorithm:
+    //
+    //   - SHA-256 / SHA3-256: NIST CSRC examples for "abc" / "" / NIST
+    //     short-message vectors.
+    //   - Keccak-256: the original Keccak team's reference vectors
+    //     (matches Ethereum's keccak256 — distinct from SHA3-256 by
+    //     padding rule).
+    //   - Blake2b-256: RFC 7693 short-message vectors.
+    //   - RIPEMD-160: ISO/IEC 10118-3 reference vectors.
+    //
+    // A green run of these tests is the canonical "no host crypto
+    // mock returns unconditional success or zero output" gate the
+    // milestone's done-when condition demands.
     #[test]
-    fn test_crypto_hash() {
-        let data = b"hello world";
-        let hash = crypto::sha256(data);
-        assert_ne!(hash.0, [0u8; 32]); // Mock returns zeros, but shouldn't panic
+    fn test_crypto_hash_sha256_known_answer() {
+        // RFC 6234 §8.5 single-block "abc" → ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+        let want = hex::decode("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad").unwrap();
+        let got = crypto::sha256(b"abc");
+        assert_eq!(got.0.to_vec(), want, "SHA-256(\"abc\") known-answer mismatch");
+
+        // FIPS 180-2 empty-string vector → e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let want_empty = hex::decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap();
+        let got_empty = crypto::sha256(b"");
+        assert_eq!(got_empty.0.to_vec(), want_empty, "SHA-256(\"\") known-answer mismatch");
+    }
+
+    #[test]
+    fn test_crypto_hash_sha3_256_known_answer() {
+        // NIST FIPS 202 SHA3-256("") → a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a
+        let want_empty = hex::decode("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a").unwrap();
+        let got_empty = crypto::sha3_256(b"");
+        assert_eq!(got_empty.0.to_vec(), want_empty, "SHA3-256(\"\") known-answer mismatch");
+
+        // SHA3-256("abc") → 3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532
+        let want_abc = hex::decode("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532").unwrap();
+        let got_abc = crypto::sha3_256(b"abc");
+        assert_eq!(got_abc.0.to_vec(), want_abc, "SHA3-256(\"abc\") known-answer mismatch");
+    }
+
+    #[test]
+    fn test_crypto_hash_keccak256_known_answer() {
+        // Ethereum keccak256("") → c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+        let want_empty = hex::decode("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470").unwrap();
+        let got_empty = crypto::keccak256(b"");
+        assert_eq!(got_empty.0.to_vec(), want_empty, "Keccak-256(\"\") known-answer mismatch");
+
+        // Ethereum keccak256("abc") → 4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45
+        let want_abc = hex::decode("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45").unwrap();
+        let got_abc = crypto::keccak256(b"abc");
+        assert_eq!(got_abc.0.to_vec(), want_abc, "Keccak-256(\"abc\") known-answer mismatch");
+
+        // Sanity: SHA3-256("abc") and Keccak-256("abc") differ (padding rule)
+        assert_ne!(crypto::sha3_256(b"abc").0, crypto::keccak256(b"abc").0,
+            "SHA3-256 and Keccak-256 must produce different digests for the same input (different padding)");
+    }
+
+    #[test]
+    fn test_crypto_hash_blake2b_256_known_answer() {
+        // Blake2b with 32-byte output (digest_length=32 is part of the
+        // BLAKE2 personalization, so this is NOT Blake2b-512 truncated
+        // to 32 bytes). The vectors below match the canonical
+        // RustCrypto blake2 crate (blake2::Blake2b<U32>) which is the
+        // industry-standard reference Rust implementation.
+        //
+        //   Blake2b-256("abc") =
+        //     bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319
+        //   Blake2b-256("")    =
+        //     0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8
+        let want_abc = hex::decode("bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319").unwrap();
+        let got_abc = crypto::blake2b_256(b"abc");
+        assert_eq!(got_abc.0.to_vec(), want_abc, "Blake2b-256(\"abc\") known-answer mismatch");
+
+        let want_empty = hex::decode("0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8").unwrap();
+        let got_empty = crypto::blake2b_256(b"");
+        assert_eq!(got_empty.0.to_vec(), want_empty, "Blake2b-256(\"\") known-answer mismatch");
+    }
+
+    #[test]
+    fn test_crypto_hash_ripemd160_known_answer() {
+        // ISO/IEC 10118-3 — RIPEMD-160("abc") =
+        // 8eb208f7e05d987a9b044a8e98c6b087f15a0bfc
+        let want_abc = hex::decode("8eb208f7e05d987a9b044a8e98c6b087f15a0bfc").unwrap();
+        let got_abc = crypto::ripemd160(b"abc");
+        assert_eq!(got_abc.to_vec(), want_abc, "RIPEMD-160(\"abc\") known-answer mismatch");
+
+        // RIPEMD-160("") = 9c1185a5c5e9fc54612808977ee8f548b2258d31
+        let want_empty = hex::decode("9c1185a5c5e9fc54612808977ee8f548b2258d31").unwrap();
+        let got_empty = crypto::ripemd160(b"");
+        assert_eq!(got_empty.to_vec(), want_empty, "RIPEMD-160(\"\") known-answer mismatch");
+    }
+
+    #[test]
+    fn test_crypto_ed25519_verify_positive_and_negative() {
+        // RFC 8032 §7.1 test vector 1:
+        //   secret: 9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60
+        //   public: d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+        //   message: ""
+        //   signature:
+        //     e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b
+        use ed25519_dalek::{SecretKey, SigningKey};
+        let secret_bytes: [u8; 32] = hex::decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let signing_key = SigningKey::from_bytes(&SecretKey::from(secret_bytes));
+        let verifying_key = signing_key.verifying_key();
+
+        let pub_bytes = verifying_key.to_bytes();
+        assert_eq!(
+            hex::encode(pub_bytes),
+            "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+            "ed25519 RFC 8032 vector 1 public key mismatch"
+        );
+
+        let sig_hex = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+        let sig_bytes: [u8; 64] = hex::decode(sig_hex).unwrap().try_into().unwrap();
+
+        // Positive — RFC 8032 vector verifies.
+        assert!(crypto::ed25519_verify(b"", &sig_bytes, &pub_bytes),
+            "ed25519_verify must accept the canonical RFC 8032 vector 1 signature");
+
+        // Negative — flipped first signature byte must fail.
+        let mut tampered = sig_bytes;
+        tampered[0] ^= 0x01;
+        assert!(!crypto::ed25519_verify(b"", &tampered, &pub_bytes),
+            "ed25519_verify must reject a tampered signature (P0-003 — no unconditional success)");
+
+        // Negative — wrong message must fail.
+        assert!(!crypto::ed25519_verify(b"different message", &sig_bytes, &pub_bytes),
+            "ed25519_verify must reject a different message under the same signature");
+
+        // Negative — flipped public-key byte must fail.
+        let mut wrong_pub = pub_bytes;
+        wrong_pub[31] ^= 0x01;
+        assert!(!crypto::ed25519_verify(b"", &sig_bytes, &wrong_pub),
+            "ed25519_verify must reject a tampered public key");
+    }
+
+    #[test]
+    fn test_crypto_secp256k1_verify_positive_and_negative_round_trip() {
+        // Generate a fresh ECDSA keypair, sign a message digest, then
+        // verify positive + tampered + wrong-message + wrong-pubkey
+        // and exercise the recover round-trip.
+        use k256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey, VerifyingKey};
+
+        let mut rng = rand_core::OsRng;
+        let signing_key = SigningKey::random(&mut rng);
+        let verifying_key = signing_key.verifying_key();
+
+        let msg = b"infrix-sdk p0-003 secp256k1 round trip";
+        let digest = crypto::sha256(msg);
+
+        let signature: Signature = signing_key.sign_prehash(&digest.0).unwrap();
+        let sig_bytes: [u8; 64] = signature.to_bytes().into();
+
+        let pub_bytes = verifying_key.to_sec1_bytes();
+        assert_eq!(pub_bytes.len(), 33, "secp256k1 verifying key must be 33-byte SEC1 compressed form");
+        let mut pub_arr = [0u8; 33];
+        pub_arr.copy_from_slice(&pub_bytes);
+
+        // Positive.
+        assert!(crypto::secp256k1_verify(&digest.0, &sig_bytes, &pub_arr),
+            "secp256k1_verify must accept a freshly-produced signature");
+
+        // Negative — flipped digest byte.
+        let mut wrong_digest = digest.0;
+        wrong_digest[0] ^= 0x01;
+        assert!(!crypto::secp256k1_verify(&wrong_digest, &sig_bytes, &pub_arr),
+            "secp256k1_verify must reject a different digest under the same signature");
+
+        // Negative — flipped signature byte.
+        let mut tampered_sig = sig_bytes;
+        tampered_sig[10] ^= 0x01;
+        assert!(!crypto::secp256k1_verify(&digest.0, &tampered_sig, &pub_arr),
+            "secp256k1_verify must reject a tampered signature");
+
+        // Negative — different keypair's pubkey.
+        let other = SigningKey::random(&mut rng);
+        let other_pub = other.verifying_key().to_sec1_bytes();
+        let mut other_arr = [0u8; 33];
+        other_arr.copy_from_slice(&other_pub);
+        assert!(!crypto::secp256k1_verify(&digest.0, &sig_bytes, &other_arr),
+            "secp256k1_verify must reject a signature against a different verifying key");
+
+        // Negative — non-32-byte digest.
+        let bogus_digest = [0u8; 31];
+        assert!(!crypto::secp256k1_verify(&bogus_digest, &sig_bytes, &pub_arr),
+            "secp256k1_verify must reject a digest of incorrect length (fail-closed)");
+
+        // Recover round-trip — produce a signature with explicit
+        // RecoveryId, recover the public key, compare against the
+        // canonical 65-byte uncompressed SEC1 encoding of the
+        // original verifying key.
+        let (recoverable_sig, recid) = signing_key.sign_prehash_recoverable(&digest.0).unwrap();
+        let recoverable_bytes: [u8; 64] = recoverable_sig.to_bytes().into();
+        let recovered = crypto::secp256k1_recover(&digest.0, &recoverable_bytes, recid.to_byte());
+        let recovered = recovered.expect("secp256k1_recover must succeed for a valid signature");
+        let want = VerifyingKey::recover_from_prehash(&digest.0, &recoverable_sig, recid)
+            .unwrap()
+            .to_encoded_point(false);
+        assert_eq!(&recovered[..], want.as_bytes(),
+            "secp256k1_recover must round-trip the canonical 65-byte uncompressed pubkey");
+
+        // Negative — flipped digest byte must produce a different recovered key.
+        let mut wrong_recover_digest = digest.0;
+        wrong_recover_digest[5] ^= 0x01;
+        if let Some(other_recovered) = crypto::secp256k1_recover(&wrong_recover_digest, &recoverable_bytes, recid.to_byte()) {
+            assert_ne!(&other_recovered[..], want.as_bytes(),
+                "secp256k1_recover must produce a different pubkey for a tampered digest (no unconditional success)");
+        }
+
+        // Negative — bad recovery_id must fail.
+        let bad_recover = crypto::secp256k1_recover(&digest.0, &recoverable_bytes, 99);
+        assert!(bad_recover.is_none(),
+            "secp256k1_recover must reject an out-of-range recovery_id");
+
+        // Negative — non-32-byte digest must fail.
+        let bad_msg_recover = crypto::secp256k1_recover(&[0u8; 31], &recoverable_bytes, recid.to_byte());
+        assert!(bad_msg_recover.is_none(),
+            "secp256k1_recover must reject a digest of incorrect length");
+    }
+
+    #[test]
+    fn test_crypto_bls12_381_verify_fails_closed_in_test_mode() {
+        // P0-003 documented error path: the std/test mock host
+        // intentionally fails BLS12-381 verification rather than
+        // returning an unconditional success. wasm32 builds reach a
+        // real BLS12-381 verifier through the host import.
+        let msg = b"any message";
+        let sig = [0u8; 96];
+        let pubkey = [0u8; 48];
+        assert!(!crypto::bls12_381_verify(msg, &sig, &pubkey),
+            "bls12_381_verify must NOT return unconditional success in std/test mode (P0-003 — fail-closed)");
     }
 
     #[test]

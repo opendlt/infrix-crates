@@ -20,4 +20,24 @@ alloc = ["infrix-types/alloc"]
 infrix-types = { path = "../infrix-types" }
 infrix-macros = { path = "../infrix-macros" }
 
+# P0-003 (2026-05-02): real crypto for the std/test mock host.
+# wasm32 builds (the actual contract surface) keep the host import
+# stubs and so do not pull these crates in. Each crate is the
+# widely-audited canonical Rust implementation:
+#   - sha2: NIST SHA-256
+#   - sha3: NIST SHA3-256 + Keccak-256 (Ethereum-compatible)
+#   - blake2: RFC 7693 BLAKE2b
+#   - ripemd: ISO/IEC 10118-3 RIPEMD-160
+#   - ed25519-dalek: RFC 8032 Ed25519 (verify_strict)
+#   - k256: secp256k1 ECDSA verify + public-key recovery
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sha2 = { version = "0.10", default-features = false, features = ["std"] }
+sha3 = { version = "0.10", default-features = false, features = ["std"] }
+blake2 = { version = "0.10", default-features = false, features = ["std"] }
+ripemd = { version = "0.1", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+k256 = { version = "0.13", default-features = false, features = ["std", "ecdsa"] }
+
 [dev-dependencies]
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+rand_core = { version = "0.6", default-features = false, features = ["std"] }
