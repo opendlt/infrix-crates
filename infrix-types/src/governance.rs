@@ -14,12 +14,20 @@ use alloc::{string::String, vec::Vec};
 /// Intent goal type categories. MUST stay in perfect parity with the
 /// Go source of truth (`pkg/intent/types.go`'s `Goal*` constants and
 /// `ValidGoalTypes`). The mediator dispatches by exact wire string,
-/// returned here by `as_str()`. Drift is fenced by
-/// `pkg/intent/sdk_goal_parity_test.go::TestSDKGoalParity_Rust`.
+/// returned here by `as_str()`.
+///
+/// P2-002 closure: the enum body and the `as_str` arms below are
+/// generated from the Go source by `pkg/codegen/sdk_goals.go::Generate`.
+/// Run `go run ./cmd/sdkgen` after changing the Go enum; the matching
+/// fence test (`pkg/codegen/sdk_goals_test.go::
+/// TestSDKGoals_GeneratedFilesUpToDate`) fails CI if this region drifts
+/// from the canonical map. Hand-edit the markers' inner content at your
+/// peril — codegen will overwrite it.
 ///
 /// `Transfer` and `EscrowCreate` were removed in Gap 13 first-pass —
 /// single-leg transfers and escrow creation now route through
 /// `Settlement` with the appropriate method.
+// SDKGEN-BEGIN(intent_goal_type)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntentGoalType {
     Convert,
@@ -84,29 +92,18 @@ pub enum IntentGoalType {
     AgentRun,
     ConfidentialExec,
     SubsystemAction,
-    /// Spec §5.3 plugin upgrade lifecycle. Mints a CompatibilityReport
-    /// sized by RiskClass that drives the approval requirement.
     PluginUpgrade,
     PluginRegister,
-    /// G-24 closed-loop operational controls. Both controllers
-    /// (GasController, RateLimitController) propose typed governance
-    /// intents that adjust operational parameters; direct in-memory
-    /// mutation is forbidden.
     GasScheduleUpdate,
     RateLimitUpdate,
-    /// G-25 phase 1c — operator-initiated session-key delegation.
-    /// The wallet's hardware key authorizes a freshly-generated
-    /// ED25519 session key with a narrowly-scoped capability
-    /// (Purpose=approval, WorkflowStageScope=current_session,
-    /// ExpiresAt ≤ now+1h).
     SessionKeyDelegate,
 }
 
 impl IntentGoalType {
     /// Returns the canonical wire-format string for this goal type.
     /// Matches the string values declared in `pkg/intent/types.go`
-    /// exactly. The Gap 15 cross-SDK parity fence parses these
-    /// literals to verify there is no drift.
+    /// exactly. Generated from the Go source of truth — do not
+    /// hand-edit; run `go run ./cmd/sdkgen` after changing the Go enum.
     pub fn as_str(&self) -> &'static str {
         match self {
             IntentGoalType::Convert => "CONVERT",
@@ -179,6 +176,7 @@ impl IntentGoalType {
         }
     }
 }
+// SDKGEN-END(intent_goal_type)
 
 /// The desired outcome of an intent.
 #[derive(Clone, Debug)]
