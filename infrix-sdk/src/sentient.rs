@@ -17,7 +17,11 @@
 //! let now = sentient::timestamp();
 //! let random = sentient::random_seed();
 //! ```
-use crate::alloc::{string::{String, ToString}, vec::Vec, format};
+use crate::alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 /// Result of a price feed query.
 pub struct PriceResult {
@@ -138,7 +142,12 @@ pub fn schedule(_target_block: u64, _function: &str, _args: &[u64]) -> u64 {
 /// // Heartbeat every 100 blocks, at most 1000 times.
 /// let hb_id = sentient::schedule_recurring(100, "heartbeat", &[], 1000);
 /// ```
-pub fn schedule_recurring(_interval_blocks: u64, _function: &str, _args: &[u64], _max_executions: u32) -> u64 {
+pub fn schedule_recurring(
+    _interval_blocks: u64,
+    _function: &str,
+    _args: &[u64],
+    _max_executions: u32,
+) -> u64 {
     // WASM: calls env::schedule_recurring(interval, fn_ptr, fn_len, args_ptr, args_len, max) -> u64
     0
 }

@@ -1,0 +1,5 @@
+error: shape beta parameter schema mismatch: expected rate:u64, got enabled:bool
+ --> tests/trybuild/schema_mismatch.rs:2:10
+  |
+2 | pub enum Shape {
+  |          ^^^^^

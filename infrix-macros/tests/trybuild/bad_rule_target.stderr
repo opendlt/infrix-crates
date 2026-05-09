@@ -1,0 +1,5 @@
+error: invalid target shape name Growth: must match [a-z_][a-z0-9_]*
+ --> tests/trybuild/bad_rule_target.rs:4:12
+  |
+4 |     pub fn grow() {}
+  |            ^^^^

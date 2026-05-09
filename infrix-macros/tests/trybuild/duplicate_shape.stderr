@@ -1,0 +1,5 @@
+error: duplicate shape name: alpha
+ --> tests/trybuild/duplicate_shape.rs:2:10
+  |
+2 | pub enum Shape {
+  |          ^^^^^

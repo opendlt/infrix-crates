@@ -111,7 +111,11 @@ pub fn generate_require_capability(cap: &str, input: &ItemFn) -> TokenStream {
 ///     // original body
 /// }
 /// ```
-pub fn generate_require_approval(threshold: u32, role: Option<&str>, input: &ItemFn) -> TokenStream {
+pub fn generate_require_approval(
+    threshold: u32,
+    role: Option<&str>,
+    input: &ItemFn,
+) -> TokenStream {
     let vis = &input.vis;
     let sig = &input.sig;
     let body = &input.block;

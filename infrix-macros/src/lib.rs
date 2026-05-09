@@ -61,8 +61,8 @@ use syn::{
     parse_macro_input, parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
-    Attribute, Block, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct,
-    Lit, LitInt, LitStr, Meta, Pat, PatType, ReturnType, Signature, Token, Type, Visibility,
+    Attribute, Block, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct, Lit,
+    LitInt, LitStr, Meta, Pat, PatType, ReturnType, Signature, Token, Type, Visibility,
 };
 
 mod governance_macros;
@@ -455,9 +455,9 @@ fn generate_call(args: CallArgs, input: ImplItemFn) -> syn::Result<TokenStream2>
     let output = &input.sig.output;
 
     // Check for &mut self
-    let has_mut_self = inputs.iter().any(|arg| {
-        matches!(arg, FnArg::Receiver(r) if r.mutability.is_some())
-    });
+    let has_mut_self = inputs
+        .iter()
+        .any(|arg| matches!(arg, FnArg::Receiver(r) if r.mutability.is_some()));
 
     if !has_mut_self {
         return Err(syn::Error::new(
@@ -467,9 +467,9 @@ fn generate_call(args: CallArgs, input: ImplItemFn) -> syn::Result<TokenStream2>
     }
 
     // Calculate selector (first 4 bytes of keccak256 of function signature)
-    let selector = args.selector.unwrap_or_else(|| {
-        calculate_selector(&fn_name_str)
-    });
+    let selector = args
+        .selector
+        .unwrap_or_else(|| calculate_selector(&fn_name_str));
 
     // Extract parameter types for ABI
     let params = extract_params(inputs)?;
@@ -567,9 +567,9 @@ fn generate_view(input: ImplItemFn) -> syn::Result<TokenStream2> {
 
     // Check for &self (not &mut self)
     let has_self = inputs.iter().any(|arg| matches!(arg, FnArg::Receiver(_)));
-    let has_mut_self = inputs.iter().any(|arg| {
-        matches!(arg, FnArg::Receiver(r) if r.mutability.is_some())
-    });
+    let has_mut_self = inputs
+        .iter()
+        .any(|arg| matches!(arg, FnArg::Receiver(r) if r.mutability.is_some()));
 
     if has_mut_self {
         return Err(syn::Error::new(
@@ -672,9 +672,10 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
             let field_name = field.ident.as_ref().unwrap();
             let field_type = &field.ty;
 
-            let is_indexed = field.attrs.iter().any(|attr| {
-                attr.path().is_ident("indexed")
-            });
+            let is_indexed = field
+                .attrs
+                .iter()
+                .any(|attr| attr.path().is_ident("indexed"));
 
             if is_indexed {
                 indexed_fields.push((field_name.clone(), field_type.clone()));
@@ -708,11 +709,15 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
 
     // Filter out indexed attribute from fields
     let filtered_fields: Vec<_> = if let syn::Fields::Named(fields) = &input.fields {
-        fields.named.iter().map(|f| {
-            let mut f = f.clone();
-            f.attrs.retain(|attr| !attr.path().is_ident("indexed"));
-            f
-        }).collect()
+        fields
+            .named
+            .iter()
+            .map(|f| {
+                let mut f = f.clone();
+                f.attrs.retain(|attr| !attr.path().is_ident("indexed"));
+                f
+            })
+            .collect()
     } else {
         vec![]
     };
@@ -967,27 +972,33 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
     };
 
     // Generate ABI
-    let call_abi: Vec<_> = call_fns.iter().map(|(name, selector)| {
-        let name_str = name.to_string();
-        quote! {
-            ::infrix_sdk::infrix_types::FunctionAbi {
-                name: #name_str,
-                selector: #selector,
-                mutability: ::infrix_sdk::infrix_types::Mutability::Mutable,
+    let call_abi: Vec<_> = call_fns
+        .iter()
+        .map(|(name, selector)| {
+            let name_str = name.to_string();
+            quote! {
+                ::infrix_sdk::infrix_types::FunctionAbi {
+                    name: #name_str,
+                    selector: #selector,
+                    mutability: ::infrix_sdk::infrix_types::Mutability::Mutable,
+                }
             }
-        }
-    }).collect();
+        })
+        .collect();
 
-    let view_abi: Vec<_> = view_fns.iter().map(|(name, selector)| {
-        let name_str = name.to_string();
-        quote! {
-            ::infrix_sdk::infrix_types::FunctionAbi {
-                name: #name_str,
-                selector: #selector,
-                mutability: ::infrix_sdk::infrix_types::Mutability::View,
+    let view_abi: Vec<_> = view_fns
+        .iter()
+        .map(|(name, selector)| {
+            let name_str = name.to_string();
+            quote! {
+                ::infrix_sdk::infrix_types::FunctionAbi {
+                    name: #name_str,
+                    selector: #selector,
+                    mutability: ::infrix_sdk::infrix_types::Mutability::View,
+                }
             }
-        }
-    }).collect();
+        })
+        .collect();
 
     // Generate schema section.
     let schema_section = generate_schema_section(self_ty, &input);
@@ -1153,11 +1164,11 @@ fn rust_type_to_schema(ty: &Type) -> String {
         "[u8;20]" => "bytes20".into(),
         "u128" => "u128".into(),
         _ if s.starts_with("Option<") => {
-            let inner = &s[7..s.len()-1];
+            let inner = &s[7..s.len() - 1];
             format!("option<{}>", inner)
         }
         _ if s.starts_with("Vec<") => {
-            let inner = &s[4..s.len()-1];
+            let inner = &s[4..s.len() - 1];
             format!("array<{}>", inner)
         }
         _ => s,
@@ -1228,7 +1239,13 @@ fn extract_doc_comment(attrs: &[Attribute]) -> String {
 /// Builds a JSON string representing the contract schema from collected metadata.
 fn build_schema_json(
     contract_name: &str,
-    functions: &[(String, String, Vec<(String, String)>, Vec<(String, String)>, String)],
+    functions: &[(
+        String,
+        String,
+        Vec<(String, String)>,
+        Vec<(String, String)>,
+        String,
+    )],
     // (name, mutability, params[(name,type)], returns[(name,type)], doc)
     events: &[(String, Vec<(String, String, bool)>)],
     // (name, fields[(name, type, indexed)])
@@ -1236,25 +1253,43 @@ fn build_schema_json(
     let mut json = String::new();
     json.push_str("{\n");
     json.push_str(&format!("  \"schema_version\": 1,\n"));
-    json.push_str(&format!("  \"name\": \"{}\",\n", escape_json(contract_name)));
+    json.push_str(&format!(
+        "  \"name\": \"{}\",\n",
+        escape_json(contract_name)
+    ));
     json.push_str("  \"functions\": [\n");
 
     for (i, (name, mutability, params, returns, doc)) in functions.iter().enumerate() {
         json.push_str("    {\n");
         json.push_str(&format!("      \"name\": \"{}\",\n", escape_json(name)));
-        json.push_str(&format!("      \"mutability\": \"{}\",\n", escape_json(mutability)));
+        json.push_str(&format!(
+            "      \"mutability\": \"{}\",\n",
+            escape_json(mutability)
+        ));
 
         json.push_str("      \"params\": [");
         for (j, (pname, ptype)) in params.iter().enumerate() {
-            if j > 0 { json.push_str(", "); }
-            json.push_str(&format!("{{\"name\":\"{}\",\"type\":\"{}\"}}", escape_json(pname), escape_json(ptype)));
+            if j > 0 {
+                json.push_str(", ");
+            }
+            json.push_str(&format!(
+                "{{\"name\":\"{}\",\"type\":\"{}\"}}",
+                escape_json(pname),
+                escape_json(ptype)
+            ));
         }
         json.push_str("],\n");
 
         json.push_str("      \"returns\": [");
         for (j, (rname, rtype)) in returns.iter().enumerate() {
-            if j > 0 { json.push_str(", "); }
-            json.push_str(&format!("{{\"name\":\"{}\",\"type\":\"{}\"}}", escape_json(rname), escape_json(rtype)));
+            if j > 0 {
+                json.push_str(", ");
+            }
+            json.push_str(&format!(
+                "{{\"name\":\"{}\",\"type\":\"{}\"}}",
+                escape_json(rname),
+                escape_json(rtype)
+            ));
         }
         json.push_str("]");
 
@@ -1263,7 +1298,9 @@ fn build_schema_json(
         }
 
         json.push_str("\n    }");
-        if i < functions.len() - 1 { json.push(','); }
+        if i < functions.len() - 1 {
+            json.push(',');
+        }
         json.push('\n');
     }
     json.push_str("  ]");
@@ -1275,14 +1312,20 @@ fn build_schema_json(
             json.push_str(&format!("      \"name\": \"{}\",\n", escape_json(name)));
             json.push_str("      \"fields\": [");
             for (j, (fname, ftype, indexed)) in fields.iter().enumerate() {
-                if j > 0 { json.push_str(", "); }
+                if j > 0 {
+                    json.push_str(", ");
+                }
                 json.push_str(&format!(
                     "{{\"name\":\"{}\",\"type\":\"{}\",\"indexed\":{}}}",
-                    escape_json(fname), escape_json(ftype), indexed
+                    escape_json(fname),
+                    escape_json(ftype),
+                    indexed
                 ));
             }
             json.push_str("]\n    }");
-            if i < events.len() - 1 { json.push(','); }
+            if i < events.len() - 1 {
+                json.push(',');
+            }
             json.push('\n');
         }
         json.push_str("  ]");
@@ -1293,7 +1336,9 @@ fn build_schema_json(
 }
 
 fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 /// Collects schema metadata from a contract_impl block and generates the
@@ -1326,7 +1371,8 @@ fn generate_schema_section(self_ty: &Type, input: &ItemImpl) -> TokenStream2 {
 
             if let Some(mut_str) = mutability {
                 let params_raw = extract_params(&method.sig.inputs).unwrap_or_default();
-                let params: Vec<(String, String)> = params_raw.iter()
+                let params: Vec<(String, String)> = params_raw
+                    .iter()
                     .map(|(name, ty)| (name.to_string(), rust_type_to_schema(ty)))
                     .collect();
 
@@ -1402,8 +1448,20 @@ mod tests {
     #[test]
     fn test_build_schema_json() {
         let functions = vec![
-            ("increment".into(), "mutable".into(), vec![], vec![("count".into(), "i32".into())], "Increments the counter.".into()),
-            ("set".into(), "mutable".into(), vec![("value".into(), "i32".into())], vec![], String::new()),
+            (
+                "increment".into(),
+                "mutable".into(),
+                vec![],
+                vec![("count".into(), "i32".into())],
+                "Increments the counter.".into(),
+            ),
+            (
+                "set".into(),
+                "mutable".into(),
+                vec![("value".into(), "i32".into())],
+                vec![],
+                String::new(),
+            ),
         ];
         let events: Vec<(String, Vec<(String, String, bool)>)> = vec![];
         let json = build_schema_json("Counter", &functions, &events);
@@ -1420,13 +1478,14 @@ mod tests {
     #[test]
     fn test_build_schema_json_with_events() {
         let functions = vec![];
-        let events = vec![
-            ("Transfer".into(), vec![
+        let events = vec![(
+            "Transfer".into(),
+            vec![
                 ("from".into(), "address".into(), true),
                 ("to".into(), "address".into(), true),
                 ("amount".into(), "u256".into(), false),
-            ]),
-        ];
+            ],
+        )];
         let json = build_schema_json("Token", &functions, &events);
 
         assert!(json.contains("\"events\""));
@@ -1689,11 +1748,8 @@ pub fn require_capability(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn require_approval(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as ApprovalArgs);
     let input = parse_macro_input!(item as ItemFn);
-    governance_macros::generate_require_approval(
-        args.threshold,
-        args.role.as_deref(),
-        &input,
-    ).into()
+    governance_macros::generate_require_approval(args.threshold, args.role.as_deref(), &input)
+        .into()
 }
 
 /// Route function execution through the intent pipeline.

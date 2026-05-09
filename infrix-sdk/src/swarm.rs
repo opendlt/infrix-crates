@@ -22,7 +22,11 @@
 //! // List swarm members
 //! let members = swarm::members()?;
 //! ```
-use crate::alloc::{string::{String, ToString}, vec::Vec, format};
+use crate::alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 /// Swarm error types.
 #[derive(Debug)]
@@ -69,12 +73,29 @@ mod host_swarm {
     extern "C" {
         pub fn swarm_id(out_ptr: *mut u8) -> i32;
         pub fn swarm_channel_get(key_ptr: *const u8, key_len: u32, out_ptr: *mut u8) -> i32;
-        pub fn swarm_channel_set(key_ptr: *const u8, key_len: u32, val_ptr: *const u8, val_len: u32) -> i32;
+        pub fn swarm_channel_set(
+            key_ptr: *const u8,
+            key_len: u32,
+            val_ptr: *const u8,
+            val_len: u32,
+        ) -> i32;
         pub fn swarm_channel_has(key_ptr: *const u8, key_len: u32) -> i32;
         pub fn swarm_channel_delete(key_ptr: *const u8, key_len: u32) -> i32;
         pub fn swarm_members(out_ptr: *mut u8, out_len: u32) -> i32;
-        pub fn swarm_member_state(addr_ptr: *const u8, addr_len: u32, key_ptr: *const u8, key_len: u32, out_ptr: *mut u8) -> i32;
-        pub fn swarm_coordinate(action_ptr: *const u8, action_len: u32, args_ptr: *const u8, args_len: u32, out_ptr: *mut u8) -> i32;
+        pub fn swarm_member_state(
+            addr_ptr: *const u8,
+            addr_len: u32,
+            key_ptr: *const u8,
+            key_len: u32,
+            out_ptr: *mut u8,
+        ) -> i32;
+        pub fn swarm_coordinate(
+            action_ptr: *const u8,
+            action_len: u32,
+            args_ptr: *const u8,
+            args_len: u32,
+            out_ptr: *mut u8,
+        ) -> i32;
         pub fn swarm_immune_state() -> i32;
     }
 }
@@ -87,11 +108,15 @@ pub fn swarm_id() -> Option<String> {
     {
         let mut buf = [0u8; 64];
         let len = unsafe { host_swarm::swarm_id(buf.as_mut_ptr()) };
-        if len <= 0 { return None; }
+        if len <= 0 {
+            return None;
+        }
         Some(String::from_utf8_lossy(&buf[..len as usize]).into_owned())
     }
     #[cfg(not(target_arch = "wasm32"))]
-    { None }
+    {
+        None
+    }
 }
 
 /// Returns the list of member addresses in the swarm.
@@ -100,13 +125,22 @@ pub fn members() -> Result<Vec<String>, SwarmError> {
     {
         let mut buf = [0u8; 4096];
         let len = unsafe { host_swarm::swarm_members(buf.as_mut_ptr(), buf.len() as u32) };
-        if len < 0 { return Err(SwarmError::NotInSwarm); }
-        if len == 0 { return Ok(Vec::new()); }
+        if len < 0 {
+            return Err(SwarmError::NotInSwarm);
+        }
+        if len == 0 {
+            return Ok(Vec::new());
+        }
         let data = &buf[..len as usize];
-        Ok(data.split(|&b| b == 0).map(|s| String::from_utf8_lossy(s).into_owned()).collect())
+        Ok(data
+            .split(|&b| b == 0)
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect())
     }
     #[cfg(not(target_arch = "wasm32"))]
-    { Ok(Vec::new()) }
+    {
+        Ok(Vec::new())
+    }
 }
 
 /// Reads a storage value from another swarm member.
@@ -116,12 +150,16 @@ pub fn member_state(member_address: &str, key: &str) -> Result<Vec<u8>, SwarmErr
         let mut buf = [0u8; 4096];
         let len = unsafe {
             host_swarm::swarm_member_state(
-                member_address.as_ptr(), member_address.len() as u32,
-                key.as_ptr(), key.len() as u32,
+                member_address.as_ptr(),
+                member_address.len() as u32,
+                key.as_ptr(),
+                key.len() as u32,
                 buf.as_mut_ptr(),
             )
         };
-        if len < 0 { return Err(SwarmError::NotInSwarm); }
+        if len < 0 {
+            return Err(SwarmError::NotInSwarm);
+        }
         Ok(buf[..len as usize].to_vec())
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -145,7 +183,9 @@ pub fn immune_state() -> Result<ImmuneState, SwarmError> {
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
-    { Ok(ImmuneState::Normal) }
+    {
+        Ok(ImmuneState::Normal)
+    }
 }
 
 /// Triggers a coordinated action programmatically.
@@ -155,8 +195,10 @@ pub fn coordinate(action: &str, args_json: &[u8]) -> Result<Vec<u8>, SwarmError>
         let mut buf = [0u8; 8192];
         let len = unsafe {
             host_swarm::swarm_coordinate(
-                action.as_ptr(), action.len() as u32,
-                args_json.as_ptr(), args_json.len() as u32,
+                action.as_ptr(),
+                action.len() as u32,
+                args_json.as_ptr(),
+                args_json.len() as u32,
                 buf.as_mut_ptr(),
             )
         };
@@ -189,7 +231,9 @@ pub mod channel {
             let mut buf = [0u8; 4096];
             let len = unsafe {
                 super::host_swarm::swarm_channel_get(
-                    key.as_ptr(), key.len() as u32, buf.as_mut_ptr(),
+                    key.as_ptr(),
+                    key.len() as u32,
+                    buf.as_mut_ptr(),
                 )
             };
             match len {
@@ -200,14 +244,21 @@ pub mod channel {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        { let _ = key; Ok(Vec::new()) }
+        {
+            let _ = key;
+            Ok(Vec::new())
+        }
     }
 
     /// Read a u64 value from the shared channel.
     pub fn get_u64(key: &str) -> Result<u64, SwarmError> {
         let data = get(key)?;
-        if data.len() < 8 { return Ok(0); }
-        Ok(u64::from_be_bytes([data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]]))
+        if data.len() < 8 {
+            return Ok(0);
+        }
+        Ok(u64::from_be_bytes([
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+        ]))
     }
 
     /// Write raw bytes to the shared channel.
@@ -216,8 +267,10 @@ pub mod channel {
         {
             let status = unsafe {
                 super::host_swarm::swarm_channel_set(
-                    key.as_ptr(), key.len() as u32,
-                    value.as_ptr(), value.len() as u32,
+                    key.as_ptr(),
+                    key.len() as u32,
+                    value.as_ptr(),
+                    value.len() as u32,
                 )
             };
             match status {
@@ -230,7 +283,10 @@ pub mod channel {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        { let _ = (key, value); Ok(()) }
+        {
+            let _ = (key, value);
+            Ok(())
+        }
     }
 
     /// Write a u64 value to the shared channel.
@@ -242,9 +298,8 @@ pub mod channel {
     pub fn has(key: &str) -> Result<bool, SwarmError> {
         #[cfg(target_arch = "wasm32")]
         {
-            let result = unsafe {
-                super::host_swarm::swarm_channel_has(key.as_ptr(), key.len() as u32)
-            };
+            let result =
+                unsafe { super::host_swarm::swarm_channel_has(key.as_ptr(), key.len() as u32) };
             match result {
                 1 => Ok(true),
                 0 => Ok(false),
@@ -254,16 +309,18 @@ pub mod channel {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        { let _ = key; Ok(false) }
+        {
+            let _ = key;
+            Ok(false)
+        }
     }
 
     /// Delete a key from the shared channel.
     pub fn delete(key: &str) -> Result<(), SwarmError> {
         #[cfg(target_arch = "wasm32")]
         {
-            let status = unsafe {
-                super::host_swarm::swarm_channel_delete(key.as_ptr(), key.len() as u32)
-            };
+            let status =
+                unsafe { super::host_swarm::swarm_channel_delete(key.as_ptr(), key.len() as u32) };
             match status {
                 0 => Ok(()),
                 1 => Err(SwarmError::KeyNotFound),
@@ -272,13 +329,16 @@ pub mod channel {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        { let _ = key; Ok(()) }
+        {
+            let _ = key;
+            Ok(())
+        }
     }
 }
 
 /// Prelude for convenient imports.
 pub mod prelude {
-    pub use super::{swarm_id, members, member_state, immune_state, coordinate};
-    pub use super::{SwarmError, ImmuneState};
     pub use super::channel;
+    pub use super::{coordinate, immune_state, member_state, members, swarm_id};
+    pub use super::{ImmuneState, SwarmError};
 }

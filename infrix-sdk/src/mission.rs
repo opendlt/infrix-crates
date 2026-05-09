@@ -30,41 +30,61 @@ mod host_mission {
 /// Returns the total lifetime call count for this contract.
 pub fn calls_total() -> u64 {
     #[cfg(target_arch = "wasm32")]
-    { unsafe { host_mission::env_mission_calls_total() } }
+    {
+        unsafe { host_mission::env_mission_calls_total() }
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { 0 }
+    {
+        0
+    }
 }
 
 /// Returns the rolling error rate (0.0-1.0).
 pub fn error_rate() -> f64 {
     #[cfg(target_arch = "wasm32")]
-    { unsafe { host_mission::env_mission_error_rate() } }
+    {
+        unsafe { host_mission::env_mission_error_rate() }
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { 0.0 }
+    {
+        0.0
+    }
 }
 
 /// Returns the average gas per call.
 pub fn gas_avg() -> f64 {
     #[cfg(target_arch = "wasm32")]
-    { unsafe { host_mission::env_mission_gas_avg() } }
+    {
+        unsafe { host_mission::env_mission_gas_avg() }
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { 0.0 }
+    {
+        0.0
+    }
 }
 
 /// Returns the uptime percentage (0.0-1.0).
 pub fn uptime() -> f64 {
     #[cfg(target_arch = "wasm32")]
-    { unsafe { host_mission::env_mission_uptime() } }
+    {
+        unsafe { host_mission::env_mission_uptime() }
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { 1.0 }
+    {
+        1.0
+    }
 }
 
 /// Returns the current anomaly score (0.0-1.0).
 pub fn anomaly_score() -> f64 {
     #[cfg(target_arch = "wasm32")]
-    { unsafe { host_mission::env_mission_anomaly_score() } }
+    {
+        unsafe { host_mission::env_mission_anomaly_score() }
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    { 0.0 }
+    {
+        0.0
+    }
 }
 
 /// Returns the SLO compliance (0.0-1.0) for the named SLO.
@@ -72,10 +92,11 @@ pub fn anomaly_score() -> f64 {
 pub fn slo_status(name: &str) -> f64 {
     #[cfg(target_arch = "wasm32")]
     {
-        unsafe {
-            host_mission::env_mission_slo_status(name.as_ptr(), name.len() as u32)
-        }
+        unsafe { host_mission::env_mission_slo_status(name.as_ptr(), name.len() as u32) }
     }
     #[cfg(not(target_arch = "wasm32"))]
-    { let _ = name; 1.0 }
+    {
+        let _ = name;
+        1.0
+    }
 }

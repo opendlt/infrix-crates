@@ -172,9 +172,8 @@ pub fn require_approval(role: &str, threshold: u32) -> Result<(), Error> {
 /// Check if a plan has received sufficient approvals.
 pub fn check_approval(plan_id: &str) -> Result<bool, Error> {
     let id_bytes = plan_id.as_bytes();
-    let result = unsafe {
-        host::host_governance_check_approval(id_bytes.as_ptr(), id_bytes.len() as u32)
-    };
+    let result =
+        unsafe { host::host_governance_check_approval(id_bytes.as_ptr(), id_bytes.len() as u32) };
     if result < 0 {
         return Err(Error::GovernanceError);
     }

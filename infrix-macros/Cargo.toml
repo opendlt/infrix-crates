@@ -18,3 +18,4 @@ syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 
 [dev-dependencies]
 infrix-types = { path = "../infrix-types" }
+trybuild = "1.0"

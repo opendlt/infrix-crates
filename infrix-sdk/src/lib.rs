@@ -73,8 +73,8 @@ pub use infrix_types::{
 };
 
 pub use infrix_macros::{call, contract, contract_impl, event, init, storage_map, view};
-pub use infrix_macros::{infrix_test, infrix_fuzz};
-pub use infrix_macros::{require_role, require_capability, require_approval, governed, evidenced};
+pub use infrix_macros::{evidenced, governed, require_approval, require_capability, require_role};
+pub use infrix_macros::{infrix_fuzz, infrix_test};
 
 /// Programmable Time — temporal primitives for historical queries,
 /// self-awareness, and (in future phases) scheduling and simulation.
@@ -119,7 +119,6 @@ pub mod mission;
 /// `cargo test`).
 pub mod testing;
 
-
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::types::{
@@ -128,7 +127,7 @@ pub mod prelude {
     };
 
     pub use crate::{call, contract, contract_impl, event, init, storage_map, view};
-    pub use crate::{require_role, require_capability, require_approval, governed, evidenced};
+    pub use crate::{evidenced, governed, require_approval, require_capability, require_role};
 
     pub use crate::crypto;
     pub use crate::env;
@@ -152,7 +151,12 @@ mod host {
     extern "C" {
         // Storage operations
         pub fn host_storage_get(key_ptr: *const u8, key_len: u32, value_ptr: *mut u8) -> i32;
-        pub fn host_storage_set(key_ptr: *const u8, key_len: u32, value_ptr: *const u8, value_len: u32);
+        pub fn host_storage_set(
+            key_ptr: *const u8,
+            key_len: u32,
+            value_ptr: *const u8,
+            value_len: u32,
+        );
         pub fn host_storage_delete(key_ptr: *const u8, key_len: u32);
         pub fn host_storage_has(key_ptr: *const u8, key_len: u32) -> i32;
 
@@ -169,18 +173,44 @@ mod host {
         // L0 Account Operations
         pub fn host_l0_get_account(url_ptr: *const u8, url_len: u32, output_ptr: *mut u8) -> i32;
         pub fn host_l0_get_balance(url_ptr: *const u8, url_len: u32, output_ptr: *mut u8) -> i32;
-        pub fn host_l0_get_data(url_ptr: *const u8, url_len: u32, entry_hash_ptr: *const u8, output_ptr: *mut u8) -> i32;
+        pub fn host_l0_get_data(
+            url_ptr: *const u8,
+            url_len: u32,
+            entry_hash_ptr: *const u8,
+            output_ptr: *mut u8,
+        ) -> i32;
         pub fn host_l0_create_account(url_ptr: *const u8, url_len: u32, account_type: u8) -> i32;
-        pub fn host_l0_write_data(url_ptr: *const u8, url_len: u32, data_ptr: *const u8, data_len: u32) -> i32;
-        pub fn host_l0_transfer(from_ptr: *const u8, from_len: u32, to_ptr: *const u8, to_len: u32, amount_ptr: *const u8) -> i32;
+        pub fn host_l0_write_data(
+            url_ptr: *const u8,
+            url_len: u32,
+            data_ptr: *const u8,
+            data_len: u32,
+        ) -> i32;
+        pub fn host_l0_transfer(
+            from_ptr: *const u8,
+            from_len: u32,
+            to_ptr: *const u8,
+            to_len: u32,
+            amount_ptr: *const u8,
+        ) -> i32;
         pub fn host_l0_burn_credits(url_ptr: *const u8, url_len: u32, amount: u64) -> i32;
 
         // L0 Authority Operations
         pub fn host_l0_get_authority(url_ptr: *const u8, url_len: u32, output_ptr: *mut u8) -> i32;
-        pub fn host_l0_check_authority(url_ptr: *const u8, url_len: u32, signer_ptr: *const u8, signer_len: u32) -> i32;
+        pub fn host_l0_check_authority(
+            url_ptr: *const u8,
+            url_len: u32,
+            signer_ptr: *const u8,
+            signer_len: u32,
+        ) -> i32;
 
         // Events
-        pub fn host_event_emit(topics_ptr: *const u8, topics_len: u32, data_ptr: *const u8, data_len: u32);
+        pub fn host_event_emit(
+            topics_ptr: *const u8,
+            topics_len: u32,
+            data_ptr: *const u8,
+            data_len: u32,
+        );
 
         // Cryptography
         pub fn host_crypto_sha256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8);
@@ -188,14 +218,47 @@ mod host {
         pub fn host_crypto_keccak256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8);
         pub fn host_crypto_blake2b_256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8);
         pub fn host_crypto_ripemd160(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8);
-        pub fn host_crypto_ed25519_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32;
-        pub fn host_crypto_secp256k1_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32;
-        pub fn host_crypto_secp256k1_recover(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, recovery_id: u8, output_ptr: *mut u8) -> i32;
-        pub fn host_crypto_bls12_381_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32;
+        pub fn host_crypto_ed25519_verify(
+            msg_ptr: *const u8,
+            msg_len: u32,
+            sig_ptr: *const u8,
+            pubkey_ptr: *const u8,
+        ) -> i32;
+        pub fn host_crypto_secp256k1_verify(
+            msg_ptr: *const u8,
+            msg_len: u32,
+            sig_ptr: *const u8,
+            pubkey_ptr: *const u8,
+        ) -> i32;
+        pub fn host_crypto_secp256k1_recover(
+            msg_ptr: *const u8,
+            msg_len: u32,
+            sig_ptr: *const u8,
+            recovery_id: u8,
+            output_ptr: *mut u8,
+        ) -> i32;
+        pub fn host_crypto_bls12_381_verify(
+            msg_ptr: *const u8,
+            msg_len: u32,
+            sig_ptr: *const u8,
+            pubkey_ptr: *const u8,
+        ) -> i32;
 
         // Cross-contract calls
-        pub fn host_call_contract(address_ptr: *const u8, address_len: u32, input_ptr: *const u8, input_len: u32, output_ptr: *mut u8) -> i32;
-        pub fn host_delegate_call(address_ptr: *const u8, address_len: u32, input_ptr: *const u8, input_len: u32, output_ptr: *mut u8) -> i32;
+        pub fn host_call_contract(
+            address_ptr: *const u8,
+            address_len: u32,
+            input_ptr: *const u8,
+            input_len: u32,
+            output_ptr: *mut u8,
+        ) -> i32;
+        pub fn host_delegate_call(
+            address_ptr: *const u8,
+            address_len: u32,
+            input_ptr: *const u8,
+            input_len: u32,
+            output_ptr: *mut u8,
+        ) -> i32;
 
         // Utility
         pub fn host_log(msg_ptr: *const u8, msg_len: u32);
@@ -206,89 +269,112 @@ mod host {
 
         // Intent operations
         pub fn host_governance_submit_intent(
-            goal_ptr: *const u8, goal_len: u32,
-            output_ptr: *mut u8
+            goal_ptr: *const u8,
+            goal_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
         pub fn host_governance_get_intent_status(
-            intent_id_ptr: *const u8, intent_id_len: u32,
-            output_ptr: *mut u8
+            intent_id_ptr: *const u8,
+            intent_id_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
 
         // Object operations
         pub fn host_governance_create_object(
-            obj_type_ptr: *const u8, obj_type_len: u32,
-            fields_ptr: *const u8, fields_len: u32,
-            output_ptr: *mut u8
+            obj_type_ptr: *const u8,
+            obj_type_len: u32,
+            fields_ptr: *const u8,
+            fields_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
         pub fn host_governance_get_object(
-            obj_type_ptr: *const u8, obj_type_len: u32,
-            id_ptr: *const u8, id_len: u32,
-            output_ptr: *mut u8
+            obj_type_ptr: *const u8,
+            obj_type_len: u32,
+            id_ptr: *const u8,
+            id_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
         pub fn host_governance_transition_object(
-            obj_type_ptr: *const u8, obj_type_len: u32,
-            id_ptr: *const u8, id_len: u32,
-            state_ptr: *const u8, state_len: u32
+            obj_type_ptr: *const u8,
+            obj_type_len: u32,
+            id_ptr: *const u8,
+            id_len: u32,
+            state_ptr: *const u8,
+            state_len: u32,
         ) -> i32;
 
         // Approval operations
         pub fn host_governance_require_approval(
-            role_ptr: *const u8, role_len: u32,
-            threshold: u32
+            role_ptr: *const u8,
+            role_len: u32,
+            threshold: u32,
         ) -> i32;
-        pub fn host_governance_check_approval(
-            plan_id_ptr: *const u8, plan_id_len: u32
-        ) -> i32;
+        pub fn host_governance_check_approval(plan_id_ptr: *const u8, plan_id_len: u32) -> i32;
 
         // Trust operations
         pub fn host_governance_get_trust_profile(
-            profile_id_ptr: *const u8, profile_id_len: u32,
-            output_ptr: *mut u8
+            profile_id_ptr: *const u8,
+            profile_id_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
         pub fn host_governance_evaluate_trust(
-            profile_id_ptr: *const u8, profile_id_len: u32,
-            output_ptr: *mut u8
+            profile_id_ptr: *const u8,
+            profile_id_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
 
         // Capability operations
         pub fn host_governance_has_capability(
-            identity_ptr: *const u8, identity_len: u32,
-            cap_ptr: *const u8, cap_len: u32
+            identity_ptr: *const u8,
+            identity_len: u32,
+            cap_ptr: *const u8,
+            cap_len: u32,
         ) -> i32;
         pub fn host_governance_grant_capability(
-            grantee_ptr: *const u8, grantee_len: u32,
-            caps_ptr: *const u8, caps_len: u32,
-            scope_ptr: *const u8, scope_len: u32,
-            output_ptr: *mut u8
+            grantee_ptr: *const u8,
+            grantee_len: u32,
+            caps_ptr: *const u8,
+            caps_len: u32,
+            scope_ptr: *const u8,
+            scope_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
-        pub fn host_governance_revoke_capability(
-            grant_id_ptr: *const u8, grant_id_len: u32
-        ) -> i32;
+        pub fn host_governance_revoke_capability(grant_id_ptr: *const u8, grant_id_len: u32)
+            -> i32;
 
         // Role operations
         pub fn host_governance_has_role(
-            identity_ptr: *const u8, identity_len: u32,
-            role_ptr: *const u8, role_len: u32
+            identity_ptr: *const u8,
+            identity_len: u32,
+            role_ptr: *const u8,
+            role_len: u32,
         ) -> i32;
         pub fn host_governance_assign_role(
-            identity_ptr: *const u8, identity_len: u32,
-            role_ptr: *const u8, role_len: u32,
-            scope_ptr: *const u8, scope_len: u32,
-            output_ptr: *mut u8
+            identity_ptr: *const u8,
+            identity_len: u32,
+            role_ptr: *const u8,
+            role_len: u32,
+            scope_ptr: *const u8,
+            scope_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
 
         // Evidence operations
         pub fn host_governance_get_evidence(
-            intent_id_ptr: *const u8, intent_id_len: u32,
-            output_ptr: *mut u8
+            intent_id_ptr: *const u8,
+            intent_id_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
 
         // Policy operations
         pub fn host_governance_evaluate_policy(
-            scope_ptr: *const u8, scope_len: u32,
-            op_type_ptr: *const u8, op_type_len: u32,
-            operands_ptr: *const u8, operands_len: u32,
-            output_ptr: *mut u8
+            scope_ptr: *const u8,
+            scope_len: u32,
+            op_type_ptr: *const u8,
+            op_type_len: u32,
+            operands_ptr: *const u8,
+            operands_len: u32,
+            output_ptr: *mut u8,
         ) -> i32;
     }
 }
@@ -328,7 +414,12 @@ mod host {
         }
     }
 
-    pub unsafe fn host_storage_set(key_ptr: *const u8, key_len: u32, value_ptr: *const u8, value_len: u32) {
+    pub unsafe fn host_storage_set(
+        key_ptr: *const u8,
+        key_len: u32,
+        value_ptr: *const u8,
+        value_len: u32,
+    ) {
         #[cfg(feature = "std")]
         {
             let key = core::slice::from_raw_parts(key_ptr, key_len as usize).to_vec();
@@ -424,47 +515,85 @@ mod host {
         }
     }
 
-    pub unsafe fn host_l0_get_account(_url_ptr: *const u8, _url_len: u32, _output_ptr: *mut u8) -> i32 {
+    pub unsafe fn host_l0_get_account(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
         -1 // Not found in mock
     }
 
-    pub unsafe fn host_l0_get_balance(_url_ptr: *const u8, _url_len: u32, output_ptr: *mut u8) -> i32 {
-        // Return zero balance
-        for i in 0..32 {
-            *output_ptr.add(i) = 0;
-        }
-        32
-    }
-
-    pub unsafe fn host_l0_get_data(_url_ptr: *const u8, _url_len: u32, _entry_hash_ptr: *const u8, _output_ptr: *mut u8) -> i32 {
+    pub unsafe fn host_l0_get_balance(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
         -1
     }
 
-    pub unsafe fn host_l0_create_account(_url_ptr: *const u8, _url_len: u32, _account_type: u8) -> i32 {
-        0 // Success in mock
+    pub unsafe fn host_l0_get_data(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _entry_hash_ptr: *const u8,
+        _output_ptr: *mut u8,
+    ) -> i32 {
+        -1
     }
 
-    pub unsafe fn host_l0_write_data(_url_ptr: *const u8, _url_len: u32, _data_ptr: *const u8, _data_len: u32) -> i32 {
-        0
+    pub unsafe fn host_l0_create_account(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _account_type: u8,
+    ) -> i32 {
+        -1
     }
 
-    pub unsafe fn host_l0_transfer(_from_ptr: *const u8, _from_len: u32, _to_ptr: *const u8, _to_len: u32, _amount_ptr: *const u8) -> i32 {
-        0
+    pub unsafe fn host_l0_write_data(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _data_ptr: *const u8,
+        _data_len: u32,
+    ) -> i32 {
+        -1
+    }
+
+    pub unsafe fn host_l0_transfer(
+        _from_ptr: *const u8,
+        _from_len: u32,
+        _to_ptr: *const u8,
+        _to_len: u32,
+        _amount_ptr: *const u8,
+    ) -> i32 {
+        -1
     }
 
     pub unsafe fn host_l0_burn_credits(_url_ptr: *const u8, _url_len: u32, _amount: u64) -> i32 {
-        0
-    }
-
-    pub unsafe fn host_l0_get_authority(_url_ptr: *const u8, _url_len: u32, _output_ptr: *mut u8) -> i32 {
         -1
     }
 
-    pub unsafe fn host_l0_check_authority(_url_ptr: *const u8, _url_len: u32, _signer_ptr: *const u8, _signer_len: u32) -> i32 {
-        1 // Authorized in mock
+    pub unsafe fn host_l0_get_authority(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
+        -1
     }
 
-    pub unsafe fn host_event_emit(_topics_ptr: *const u8, _topics_len: u32, _data_ptr: *const u8, _data_len: u32) {
+    pub unsafe fn host_l0_check_authority(
+        _url_ptr: *const u8,
+        _url_len: u32,
+        _signer_ptr: *const u8,
+        _signer_len: u32,
+    ) -> i32 {
+        0
+    }
+
+    pub unsafe fn host_event_emit(
+        _topics_ptr: *const u8,
+        _topics_len: u32,
+        _data_ptr: *const u8,
+        _data_len: u32,
+    ) {
         // No-op in mock
     }
 
@@ -480,15 +609,17 @@ mod host {
     // wasm32 builds keep the extern "C" host imports defined above;
     // operators wire real implementations on the host side.
 
+    use blake2::{digest::consts::U32, Blake2b};
+    use ed25519_dalek::{
+        Signature as Ed25519Signature, Verifier as _, VerifyingKey as Ed25519VerifyingKey,
+    };
+    use k256::ecdsa::{
+        signature::hazmat::PrehashVerifier as _, RecoveryId, Signature as K256Signature,
+        VerifyingKey as K256VerifyingKey,
+    };
+    use ripemd::Ripemd160;
     use sha2::{Digest as _, Sha256};
     use sha3::{Keccak256, Sha3_256};
-    use blake2::{Blake2b, digest::consts::U32};
-    use ripemd::Ripemd160;
-    use ed25519_dalek::{Signature as Ed25519Signature, Verifier as _, VerifyingKey as Ed25519VerifyingKey};
-    use k256::ecdsa::{
-        signature::hazmat::PrehashVerifier as _,
-        RecoveryId, Signature as K256Signature, VerifyingKey as K256VerifyingKey,
-    };
 
     pub unsafe fn host_crypto_sha256(data_ptr: *const u8, data_len: u32, output_ptr: *mut u8) {
         let data = core::slice::from_raw_parts(data_ptr, data_len as usize);
@@ -522,7 +653,12 @@ mod host {
         core::ptr::copy_nonoverlapping(digest.as_ptr(), output_ptr, 20);
     }
 
-    pub unsafe fn host_crypto_ed25519_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32 {
+    pub unsafe fn host_crypto_ed25519_verify(
+        msg_ptr: *const u8,
+        msg_len: u32,
+        sig_ptr: *const u8,
+        pubkey_ptr: *const u8,
+    ) -> i32 {
         let msg = core::slice::from_raw_parts(msg_ptr, msg_len as usize);
         let sig_bytes = core::slice::from_raw_parts(sig_ptr, 64);
         let pubkey_bytes = core::slice::from_raw_parts(pubkey_ptr, 32);
@@ -541,7 +677,12 @@ mod host {
         }
     }
 
-    pub unsafe fn host_crypto_secp256k1_verify(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, pubkey_ptr: *const u8) -> i32 {
+    pub unsafe fn host_crypto_secp256k1_verify(
+        msg_ptr: *const u8,
+        msg_len: u32,
+        sig_ptr: *const u8,
+        pubkey_ptr: *const u8,
+    ) -> i32 {
         // The secp256k1 verify contract takes the canonical 32-byte
         // message digest the caller has already produced (matches the
         // wasm host contract — host_crypto_secp256k1_verify hashes are
@@ -568,7 +709,13 @@ mod host {
         }
     }
 
-    pub unsafe fn host_crypto_secp256k1_recover(msg_ptr: *const u8, msg_len: u32, sig_ptr: *const u8, recovery_id: u8, output_ptr: *mut u8) -> i32 {
+    pub unsafe fn host_crypto_secp256k1_recover(
+        msg_ptr: *const u8,
+        msg_len: u32,
+        sig_ptr: *const u8,
+        recovery_id: u8,
+        output_ptr: *mut u8,
+    ) -> i32 {
         // Like verify, the caller supplies the pre-hashed 32-byte
         // digest. Output is the canonical 65-byte uncompressed SEC1
         // public key (0x04 || X || Y).
@@ -599,7 +746,12 @@ mod host {
         65
     }
 
-    pub unsafe fn host_crypto_bls12_381_verify(_msg_ptr: *const u8, _msg_len: u32, _sig_ptr: *const u8, _pubkey_ptr: *const u8) -> i32 {
+    pub unsafe fn host_crypto_bls12_381_verify(
+        _msg_ptr: *const u8,
+        _msg_len: u32,
+        _sig_ptr: *const u8,
+        _pubkey_ptr: *const u8,
+    ) -> i32 {
         // P0-003 documented error path: the std/test mock host does
         // NOT verify BLS12-381 signatures. Returning 0 (invalid) is
         // the fail-closed posture every other host crypto mock now
@@ -609,11 +761,23 @@ mod host {
         0
     }
 
-    pub unsafe fn host_call_contract(_address_ptr: *const u8, _address_len: u32, _input_ptr: *const u8, _input_len: u32, _output_ptr: *mut u8) -> i32 {
+    pub unsafe fn host_call_contract(
+        _address_ptr: *const u8,
+        _address_len: u32,
+        _input_ptr: *const u8,
+        _input_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
         -1 // Not implemented in mock
     }
 
-    pub unsafe fn host_delegate_call(_address_ptr: *const u8, _address_len: u32, _input_ptr: *const u8, _input_len: u32, _output_ptr: *mut u8) -> i32 {
+    pub unsafe fn host_delegate_call(
+        _address_ptr: *const u8,
+        _address_len: u32,
+        _input_ptr: *const u8,
+        _input_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
         -1
     }
 
@@ -655,22 +819,102 @@ mod host {
     }
 
     // Governance host function mocks
-    pub unsafe fn host_governance_submit_intent(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_get_intent_status(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_create_object(_: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_get_object(_: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_transition_object(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32) -> i32 { -1 }
-    pub unsafe fn host_governance_require_approval(_: *const u8, _: u32, _: u32) -> i32 { -1 }
-    pub unsafe fn host_governance_check_approval(_: *const u8, _: u32) -> i32 { -1 }
-    pub unsafe fn host_governance_get_trust_profile(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_evaluate_trust(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_has_capability(_: *const u8, _: u32, _: *const u8, _: u32) -> i32 { 0 }
-    pub unsafe fn host_governance_grant_capability(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_revoke_capability(_: *const u8, _: u32) -> i32 { -1 }
-    pub unsafe fn host_governance_has_role(_: *const u8, _: u32, _: *const u8, _: u32) -> i32 { 0 }
-    pub unsafe fn host_governance_assign_role(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_get_evidence(_: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
-    pub unsafe fn host_governance_evaluate_policy(_: *const u8, _: u32, _: *const u8, _: u32, _: *const u8, _: u32, _: *mut u8) -> i32 { -1 }
+    pub unsafe fn host_governance_submit_intent(_: *const u8, _: u32, _: *mut u8) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_get_intent_status(_: *const u8, _: u32, _: *mut u8) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_create_object(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *mut u8,
+    ) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_get_object(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *mut u8,
+    ) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_transition_object(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+    ) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_require_approval(_: *const u8, _: u32, _: u32) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_check_approval(_: *const u8, _: u32) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_get_trust_profile(_: *const u8, _: u32, _: *mut u8) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_evaluate_trust(_: *const u8, _: u32, _: *mut u8) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_has_capability(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+    ) -> i32 {
+        0
+    }
+    pub unsafe fn host_governance_grant_capability(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *mut u8,
+    ) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_revoke_capability(_: *const u8, _: u32) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_has_role(_: *const u8, _: u32, _: *const u8, _: u32) -> i32 {
+        0
+    }
+    pub unsafe fn host_governance_assign_role(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *mut u8,
+    ) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_get_evidence(_: *const u8, _: u32, _: *mut u8) -> i32 {
+        -1
+    }
+    pub unsafe fn host_governance_evaluate_policy(
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *const u8,
+        _: u32,
+        _: *mut u8,
+    ) -> i32 {
+        -1
+    }
 }
 
 // =============================================================================
@@ -696,9 +940,8 @@ pub mod storage {
     #[cfg(feature = "alloc")]
     pub fn get(key: &[u8]) -> Option<alloc::vec::Vec<u8>> {
         let mut buffer = alloc::vec![0u8; MAX_VALUE_SIZE];
-        let result = unsafe {
-            host::host_storage_get(key.as_ptr(), key.len() as u32, buffer.as_mut_ptr())
-        };
+        let result =
+            unsafe { host::host_storage_get(key.as_ptr(), key.len() as u32, buffer.as_mut_ptr()) };
 
         if result < 0 {
             None
@@ -712,9 +955,8 @@ pub mod storage {
     ///
     /// Returns the number of bytes read, or `None` if the key doesn't exist.
     pub fn get_into(key: &[u8], buffer: &mut [u8]) -> Option<usize> {
-        let result = unsafe {
-            host::host_storage_get(key.as_ptr(), key.len() as u32, buffer.as_mut_ptr())
-        };
+        let result =
+            unsafe { host::host_storage_get(key.as_ptr(), key.len() as u32, buffer.as_mut_ptr()) };
 
         if result < 0 {
             None
@@ -726,9 +968,8 @@ pub mod storage {
     /// Get and decode a value from storage
     pub fn get_decoded<T: Decode>(key: &[u8]) -> Option<T> {
         let mut buffer = [0u8; MAX_VALUE_SIZE];
-        let result = unsafe {
-            host::host_storage_get(key.as_ptr(), key.len() as u32, buffer.as_mut_ptr())
-        };
+        let result =
+            unsafe { host::host_storage_get(key.as_ptr(), key.len() as u32, buffer.as_mut_ptr()) };
 
         if result < 0 {
             None
@@ -987,7 +1228,11 @@ pub mod l0 {
         let mut buffer = [0u8; 1024];
 
         let result = unsafe {
-            host::host_l0_get_account(url_bytes.as_ptr(), url_bytes.len() as u32, buffer.as_mut_ptr())
+            host::host_l0_get_account(
+                url_bytes.as_ptr(),
+                url_bytes.len() as u32,
+                buffer.as_mut_ptr(),
+            )
         };
 
         if result < 0 {
@@ -1007,12 +1252,12 @@ pub mod l0 {
 
         let balance = U256::from_be_bytes(buffer[1..33].try_into().unwrap_or(&[0u8; 32]));
         let credit_balance = u64::from_be_bytes([
-            buffer[33], buffer[34], buffer[35], buffer[36],
-            buffer[37], buffer[38], buffer[39], buffer[40],
+            buffer[33], buffer[34], buffer[35], buffer[36], buffer[37], buffer[38], buffer[39],
+            buffer[40],
         ]);
         let data_entry_count = u64::from_be_bytes([
-            buffer[41], buffer[42], buffer[43], buffer[44],
-            buffer[45], buffer[46], buffer[47], buffer[48],
+            buffer[41], buffer[42], buffer[43], buffer[44], buffer[45], buffer[46], buffer[47],
+            buffer[48],
         ]);
 
         Some(L0Account {
@@ -1030,7 +1275,11 @@ pub mod l0 {
         let mut buffer = [0u8; 32];
 
         let result = unsafe {
-            host::host_l0_get_balance(url_bytes.as_ptr(), url_bytes.len() as u32, buffer.as_mut_ptr())
+            host::host_l0_get_balance(
+                url_bytes.as_ptr(),
+                url_bytes.len() as u32,
+                buffer.as_mut_ptr(),
+            )
         };
 
         if result < 0 {
@@ -1183,7 +1432,11 @@ pub mod l0 {
         let mut buffer = [0u8; 512];
 
         let result = unsafe {
-            host::host_l0_get_authority(url_bytes.as_ptr(), url_bytes.len() as u32, buffer.as_mut_ptr())
+            host::host_l0_get_authority(
+                url_bytes.as_ptr(),
+                url_bytes.len() as u32,
+                buffer.as_mut_ptr(),
+            )
         };
 
         if result < 0 {
@@ -1195,12 +1448,24 @@ pub mod l0 {
 
         let offset = 1 + key_book_len;
         let threshold = u64::from_be_bytes([
-            buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3],
-            buffer[offset + 4], buffer[offset + 5], buffer[offset + 6], buffer[offset + 7],
+            buffer[offset],
+            buffer[offset + 1],
+            buffer[offset + 2],
+            buffer[offset + 3],
+            buffer[offset + 4],
+            buffer[offset + 5],
+            buffer[offset + 6],
+            buffer[offset + 7],
         ]);
         let signers = u64::from_be_bytes([
-            buffer[offset + 8], buffer[offset + 9], buffer[offset + 10], buffer[offset + 11],
-            buffer[offset + 12], buffer[offset + 13], buffer[offset + 14], buffer[offset + 15],
+            buffer[offset + 8],
+            buffer[offset + 9],
+            buffer[offset + 10],
+            buffer[offset + 11],
+            buffer[offset + 12],
+            buffer[offset + 13],
+            buffer[offset + 14],
+            buffer[offset + 15],
         ]);
 
         Some(Authority {
@@ -1461,11 +1726,7 @@ pub mod calls {
     }
 
     /// Call another contract into a buffer
-    pub fn call_into(
-        address: &Address,
-        input: &[u8],
-        output: &mut [u8],
-    ) -> Result<usize, Error> {
+    pub fn call_into(address: &Address, input: &[u8], output: &mut [u8]) -> Result<usize, Error> {
         let address_bytes = address.as_bytes();
 
         let result = unsafe {
@@ -1887,40 +2148,75 @@ mod tests {
     #[test]
     fn test_crypto_hash_sha256_known_answer() {
         // RFC 6234 §8.5 single-block "abc" → ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
-        let want = hex::decode("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad").unwrap();
+        let want = hex::decode("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            .unwrap();
         let got = crypto::sha256(b"abc");
-        assert_eq!(got.0.to_vec(), want, "SHA-256(\"abc\") known-answer mismatch");
+        assert_eq!(
+            got.0.to_vec(),
+            want,
+            "SHA-256(\"abc\") known-answer mismatch"
+        );
 
         // FIPS 180-2 empty-string vector → e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-        let want_empty = hex::decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap();
+        let want_empty =
+            hex::decode("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+                .unwrap();
         let got_empty = crypto::sha256(b"");
-        assert_eq!(got_empty.0.to_vec(), want_empty, "SHA-256(\"\") known-answer mismatch");
+        assert_eq!(
+            got_empty.0.to_vec(),
+            want_empty,
+            "SHA-256(\"\") known-answer mismatch"
+        );
     }
 
     #[test]
     fn test_crypto_hash_sha3_256_known_answer() {
         // NIST FIPS 202 SHA3-256("") → a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a
-        let want_empty = hex::decode("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a").unwrap();
+        let want_empty =
+            hex::decode("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a")
+                .unwrap();
         let got_empty = crypto::sha3_256(b"");
-        assert_eq!(got_empty.0.to_vec(), want_empty, "SHA3-256(\"\") known-answer mismatch");
+        assert_eq!(
+            got_empty.0.to_vec(),
+            want_empty,
+            "SHA3-256(\"\") known-answer mismatch"
+        );
 
         // SHA3-256("abc") → 3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532
-        let want_abc = hex::decode("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532").unwrap();
+        let want_abc =
+            hex::decode("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
+                .unwrap();
         let got_abc = crypto::sha3_256(b"abc");
-        assert_eq!(got_abc.0.to_vec(), want_abc, "SHA3-256(\"abc\") known-answer mismatch");
+        assert_eq!(
+            got_abc.0.to_vec(),
+            want_abc,
+            "SHA3-256(\"abc\") known-answer mismatch"
+        );
     }
 
     #[test]
     fn test_crypto_hash_keccak256_known_answer() {
         // Ethereum keccak256("") → c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
-        let want_empty = hex::decode("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470").unwrap();
+        let want_empty =
+            hex::decode("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
+                .unwrap();
         let got_empty = crypto::keccak256(b"");
-        assert_eq!(got_empty.0.to_vec(), want_empty, "Keccak-256(\"\") known-answer mismatch");
+        assert_eq!(
+            got_empty.0.to_vec(),
+            want_empty,
+            "Keccak-256(\"\") known-answer mismatch"
+        );
 
         // Ethereum keccak256("abc") → 4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45
-        let want_abc = hex::decode("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45").unwrap();
+        let want_abc =
+            hex::decode("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
+                .unwrap();
         let got_abc = crypto::keccak256(b"abc");
-        assert_eq!(got_abc.0.to_vec(), want_abc, "Keccak-256(\"abc\") known-answer mismatch");
+        assert_eq!(
+            got_abc.0.to_vec(),
+            want_abc,
+            "Keccak-256(\"abc\") known-answer mismatch"
+        );
 
         // Sanity: SHA3-256("abc") and Keccak-256("abc") differ (padding rule)
         assert_ne!(crypto::sha3_256(b"abc").0, crypto::keccak256(b"abc").0,
@@ -1939,13 +2235,25 @@ mod tests {
         //     bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319
         //   Blake2b-256("")    =
         //     0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8
-        let want_abc = hex::decode("bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319").unwrap();
+        let want_abc =
+            hex::decode("bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319")
+                .unwrap();
         let got_abc = crypto::blake2b_256(b"abc");
-        assert_eq!(got_abc.0.to_vec(), want_abc, "Blake2b-256(\"abc\") known-answer mismatch");
+        assert_eq!(
+            got_abc.0.to_vec(),
+            want_abc,
+            "Blake2b-256(\"abc\") known-answer mismatch"
+        );
 
-        let want_empty = hex::decode("0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8").unwrap();
+        let want_empty =
+            hex::decode("0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8")
+                .unwrap();
         let got_empty = crypto::blake2b_256(b"");
-        assert_eq!(got_empty.0.to_vec(), want_empty, "Blake2b-256(\"\") known-answer mismatch");
+        assert_eq!(
+            got_empty.0.to_vec(),
+            want_empty,
+            "Blake2b-256(\"\") known-answer mismatch"
+        );
     }
 
     #[test]
@@ -1954,12 +2262,20 @@ mod tests {
         // 8eb208f7e05d987a9b044a8e98c6b087f15a0bfc
         let want_abc = hex::decode("8eb208f7e05d987a9b044a8e98c6b087f15a0bfc").unwrap();
         let got_abc = crypto::ripemd160(b"abc");
-        assert_eq!(got_abc.to_vec(), want_abc, "RIPEMD-160(\"abc\") known-answer mismatch");
+        assert_eq!(
+            got_abc.to_vec(),
+            want_abc,
+            "RIPEMD-160(\"abc\") known-answer mismatch"
+        );
 
         // RIPEMD-160("") = 9c1185a5c5e9fc54612808977ee8f548b2258d31
         let want_empty = hex::decode("9c1185a5c5e9fc54612808977ee8f548b2258d31").unwrap();
         let got_empty = crypto::ripemd160(b"");
-        assert_eq!(got_empty.to_vec(), want_empty, "RIPEMD-160(\"\") known-answer mismatch");
+        assert_eq!(
+            got_empty.to_vec(),
+            want_empty,
+            "RIPEMD-160(\"\") known-answer mismatch"
+        );
     }
 
     #[test]
@@ -1971,10 +2287,11 @@ mod tests {
         //   signature:
         //     e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b
         use ed25519_dalek::{SecretKey, SigningKey};
-        let secret_bytes: [u8; 32] = hex::decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let secret_bytes: [u8; 32] =
+            hex::decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+                .unwrap()
+                .try_into()
+                .unwrap();
         let signing_key = SigningKey::from_bytes(&SecretKey::from(secret_bytes));
         let verifying_key = signing_key.verifying_key();
 
@@ -1989,24 +2306,32 @@ mod tests {
         let sig_bytes: [u8; 64] = hex::decode(sig_hex).unwrap().try_into().unwrap();
 
         // Positive — RFC 8032 vector verifies.
-        assert!(crypto::ed25519_verify(b"", &sig_bytes, &pub_bytes),
-            "ed25519_verify must accept the canonical RFC 8032 vector 1 signature");
+        assert!(
+            crypto::ed25519_verify(b"", &sig_bytes, &pub_bytes),
+            "ed25519_verify must accept the canonical RFC 8032 vector 1 signature"
+        );
 
         // Negative — flipped first signature byte must fail.
         let mut tampered = sig_bytes;
         tampered[0] ^= 0x01;
-        assert!(!crypto::ed25519_verify(b"", &tampered, &pub_bytes),
-            "ed25519_verify must reject a tampered signature (P0-003 — no unconditional success)");
+        assert!(
+            !crypto::ed25519_verify(b"", &tampered, &pub_bytes),
+            "ed25519_verify must reject a tampered signature (P0-003 — no unconditional success)"
+        );
 
         // Negative — wrong message must fail.
-        assert!(!crypto::ed25519_verify(b"different message", &sig_bytes, &pub_bytes),
-            "ed25519_verify must reject a different message under the same signature");
+        assert!(
+            !crypto::ed25519_verify(b"different message", &sig_bytes, &pub_bytes),
+            "ed25519_verify must reject a different message under the same signature"
+        );
 
         // Negative — flipped public-key byte must fail.
         let mut wrong_pub = pub_bytes;
         wrong_pub[31] ^= 0x01;
-        assert!(!crypto::ed25519_verify(b"", &sig_bytes, &wrong_pub),
-            "ed25519_verify must reject a tampered public key");
+        assert!(
+            !crypto::ed25519_verify(b"", &sig_bytes, &wrong_pub),
+            "ed25519_verify must reject a tampered public key"
+        );
     }
 
     #[test]
@@ -2027,38 +2352,52 @@ mod tests {
         let sig_bytes: [u8; 64] = signature.to_bytes().into();
 
         let pub_bytes = verifying_key.to_sec1_bytes();
-        assert_eq!(pub_bytes.len(), 33, "secp256k1 verifying key must be 33-byte SEC1 compressed form");
+        assert_eq!(
+            pub_bytes.len(),
+            33,
+            "secp256k1 verifying key must be 33-byte SEC1 compressed form"
+        );
         let mut pub_arr = [0u8; 33];
         pub_arr.copy_from_slice(&pub_bytes);
 
         // Positive.
-        assert!(crypto::secp256k1_verify(&digest.0, &sig_bytes, &pub_arr),
-            "secp256k1_verify must accept a freshly-produced signature");
+        assert!(
+            crypto::secp256k1_verify(&digest.0, &sig_bytes, &pub_arr),
+            "secp256k1_verify must accept a freshly-produced signature"
+        );
 
         // Negative — flipped digest byte.
         let mut wrong_digest = digest.0;
         wrong_digest[0] ^= 0x01;
-        assert!(!crypto::secp256k1_verify(&wrong_digest, &sig_bytes, &pub_arr),
-            "secp256k1_verify must reject a different digest under the same signature");
+        assert!(
+            !crypto::secp256k1_verify(&wrong_digest, &sig_bytes, &pub_arr),
+            "secp256k1_verify must reject a different digest under the same signature"
+        );
 
         // Negative — flipped signature byte.
         let mut tampered_sig = sig_bytes;
         tampered_sig[10] ^= 0x01;
-        assert!(!crypto::secp256k1_verify(&digest.0, &tampered_sig, &pub_arr),
-            "secp256k1_verify must reject a tampered signature");
+        assert!(
+            !crypto::secp256k1_verify(&digest.0, &tampered_sig, &pub_arr),
+            "secp256k1_verify must reject a tampered signature"
+        );
 
         // Negative — different keypair's pubkey.
         let other = SigningKey::random(&mut rng);
         let other_pub = other.verifying_key().to_sec1_bytes();
         let mut other_arr = [0u8; 33];
         other_arr.copy_from_slice(&other_pub);
-        assert!(!crypto::secp256k1_verify(&digest.0, &sig_bytes, &other_arr),
-            "secp256k1_verify must reject a signature against a different verifying key");
+        assert!(
+            !crypto::secp256k1_verify(&digest.0, &sig_bytes, &other_arr),
+            "secp256k1_verify must reject a signature against a different verifying key"
+        );
 
         // Negative — non-32-byte digest.
         let bogus_digest = [0u8; 31];
-        assert!(!crypto::secp256k1_verify(&bogus_digest, &sig_bytes, &pub_arr),
-            "secp256k1_verify must reject a digest of incorrect length (fail-closed)");
+        assert!(
+            !crypto::secp256k1_verify(&bogus_digest, &sig_bytes, &pub_arr),
+            "secp256k1_verify must reject a digest of incorrect length (fail-closed)"
+        );
 
         // Recover round-trip — produce a signature with explicit
         // RecoveryId, recover the public key, compare against the
@@ -2071,26 +2410,36 @@ mod tests {
         let want = VerifyingKey::recover_from_prehash(&digest.0, &recoverable_sig, recid)
             .unwrap()
             .to_encoded_point(false);
-        assert_eq!(&recovered[..], want.as_bytes(),
-            "secp256k1_recover must round-trip the canonical 65-byte uncompressed pubkey");
+        assert_eq!(
+            &recovered[..],
+            want.as_bytes(),
+            "secp256k1_recover must round-trip the canonical 65-byte uncompressed pubkey"
+        );
 
         // Negative — flipped digest byte must produce a different recovered key.
         let mut wrong_recover_digest = digest.0;
         wrong_recover_digest[5] ^= 0x01;
-        if let Some(other_recovered) = crypto::secp256k1_recover(&wrong_recover_digest, &recoverable_bytes, recid.to_byte()) {
+        if let Some(other_recovered) =
+            crypto::secp256k1_recover(&wrong_recover_digest, &recoverable_bytes, recid.to_byte())
+        {
             assert_ne!(&other_recovered[..], want.as_bytes(),
                 "secp256k1_recover must produce a different pubkey for a tampered digest (no unconditional success)");
         }
 
         // Negative — bad recovery_id must fail.
         let bad_recover = crypto::secp256k1_recover(&digest.0, &recoverable_bytes, 99);
-        assert!(bad_recover.is_none(),
-            "secp256k1_recover must reject an out-of-range recovery_id");
+        assert!(
+            bad_recover.is_none(),
+            "secp256k1_recover must reject an out-of-range recovery_id"
+        );
 
         // Negative — non-32-byte digest must fail.
-        let bad_msg_recover = crypto::secp256k1_recover(&[0u8; 31], &recoverable_bytes, recid.to_byte());
-        assert!(bad_msg_recover.is_none(),
-            "secp256k1_recover must reject a digest of incorrect length");
+        let bad_msg_recover =
+            crypto::secp256k1_recover(&[0u8; 31], &recoverable_bytes, recid.to_byte());
+        assert!(
+            bad_msg_recover.is_none(),
+            "secp256k1_recover must reject a digest of incorrect length"
+        );
     }
 
     #[test]

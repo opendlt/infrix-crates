@@ -27,8 +27,10 @@ mod host_temporal {
         /// Query historical state. Returns the number of value bytes written
         /// to `out_ptr`, or -1 if the key was not found at the given block.
         pub fn host_temporal_state_at_block(
-            contract_ptr: *const u8, contract_len: u32,
-            key_ptr: *const u8, key_len: u32,
+            contract_ptr: *const u8,
+            contract_len: u32,
+            key_ptr: *const u8,
+            key_len: u32,
             block_height: u64,
             out_ptr: *mut u8,
         ) -> i32;
@@ -36,7 +38,8 @@ mod host_temporal {
         /// Query state history. Writes a packed sequence of entries to
         /// `out_ptr`. Returns the number of entries written.
         pub fn host_temporal_my_state_history(
-            key_ptr: *const u8, key_len: u32,
+            key_ptr: *const u8,
+            key_len: u32,
             max_entries: u32,
             out_ptr: *mut u8,
         ) -> i32;
@@ -72,20 +75,30 @@ pub struct StateHistoryEntry {
 ///
 /// # Cost
 /// ~500 gas (5x a normal storage read).
-pub fn state_at_block(contract_url: &str, storage_key: &str, block_height: u64) -> HistoricalResult {
+pub fn state_at_block(
+    contract_url: &str,
+    storage_key: &str,
+    block_height: u64,
+) -> HistoricalResult {
     #[cfg(target_arch = "wasm32")]
     {
         let mut buf = [0u8; 4096];
         let ret = unsafe {
             host_temporal::host_temporal_state_at_block(
-                contract_url.as_ptr(), contract_url.len() as u32,
-                storage_key.as_ptr(), storage_key.len() as u32,
+                contract_url.as_ptr(),
+                contract_url.len() as u32,
+                storage_key.as_ptr(),
+                storage_key.len() as u32,
                 block_height,
                 buf.as_mut_ptr(),
             )
         };
         if ret < 0 {
-            return HistoricalResult { value: Vec::new(), found: false, block_height };
+            return HistoricalResult {
+                value: Vec::new(),
+                found: false,
+                block_height,
+            };
         }
         let len = ret as usize;
         return HistoricalResult {
@@ -121,7 +134,8 @@ pub fn my_state_history(storage_key: &str, max_entries: u32) -> Vec<StateHistory
         let mut buf = [0u8; 65536];
         let count = unsafe {
             host_temporal::host_temporal_my_state_history(
-                storage_key.as_ptr(), storage_key.len() as u32,
+                storage_key.as_ptr(),
+                storage_key.len() as u32,
                 max_entries,
                 buf.as_mut_ptr(),
             )
@@ -132,28 +146,58 @@ pub fn my_state_history(storage_key: &str, max_entries: u32) -> Vec<StateHistory
         let mut entries = Vec::new();
         let mut offset = 0usize;
         for _ in 0..count {
-            if offset + 8 > buf.len() { break; }
+            if offset + 8 > buf.len() {
+                break;
+            }
             let bh = u64::from_le_bytes([
-                buf[offset], buf[offset+1], buf[offset+2], buf[offset+3],
-                buf[offset+4], buf[offset+5], buf[offset+6], buf[offset+7],
+                buf[offset],
+                buf[offset + 1],
+                buf[offset + 2],
+                buf[offset + 3],
+                buf[offset + 4],
+                buf[offset + 5],
+                buf[offset + 6],
+                buf[offset + 7],
             ]);
             offset += 8;
 
-            if offset + 4 > buf.len() { break; }
-            let old_len = u32::from_le_bytes([buf[offset], buf[offset+1], buf[offset+2], buf[offset+3]]) as usize;
+            if offset + 4 > buf.len() {
+                break;
+            }
+            let old_len = u32::from_le_bytes([
+                buf[offset],
+                buf[offset + 1],
+                buf[offset + 2],
+                buf[offset + 3],
+            ]) as usize;
             offset += 4;
-            if offset + old_len > buf.len() { break; }
-            let old_value = buf[offset..offset+old_len].to_vec();
+            if offset + old_len > buf.len() {
+                break;
+            }
+            let old_value = buf[offset..offset + old_len].to_vec();
             offset += old_len;
 
-            if offset + 4 > buf.len() { break; }
-            let new_len = u32::from_le_bytes([buf[offset], buf[offset+1], buf[offset+2], buf[offset+3]]) as usize;
+            if offset + 4 > buf.len() {
+                break;
+            }
+            let new_len = u32::from_le_bytes([
+                buf[offset],
+                buf[offset + 1],
+                buf[offset + 2],
+                buf[offset + 3],
+            ]) as usize;
             offset += 4;
-            if offset + new_len > buf.len() { break; }
-            let new_value = buf[offset..offset+new_len].to_vec();
+            if offset + new_len > buf.len() {
+                break;
+            }
+            let new_value = buf[offset..offset + new_len].to_vec();
             offset += new_len;
 
-            entries.push(StateHistoryEntry { block_height: bh, old_value, new_value });
+            entries.push(StateHistoryEntry {
+                block_height: bh,
+                old_value,
+                new_value,
+            });
         }
         return entries;
     }
@@ -231,7 +275,12 @@ pub fn schedule_at(_target_block: u64, _function: &str, _args: &[u64]) -> u64 {
 ///
 /// # Cost
 /// ~2000 gas.
-pub fn schedule_recurring(_interval_blocks: u64, _function: &str, _args: &[u64], _max_executions: u32) -> u64 {
+pub fn schedule_recurring(
+    _interval_blocks: u64,
+    _function: &str,
+    _args: &[u64],
+    _max_executions: u32,
+) -> u64 {
     // In WASM mode, calls env::schedule_recurring().
     0
 }
@@ -258,7 +307,9 @@ pub struct SimulationResult {
 }
 
 impl SimulationResult {
-    pub fn would_succeed(&self) -> bool { self.success }
+    pub fn would_succeed(&self) -> bool {
+        self.success
+    }
     pub fn return_i32(&self) -> i32 {
         self.return_values.first().map(|v| *v as i32).unwrap_or(0)
     }
@@ -288,7 +339,12 @@ pub fn simulate(function: &str, args: &[u64]) -> SimulationResult {
         v
     };
     let _ = function; // used by WASM host call; suppress unused warning
-    SimulationResult { success: true, return_values, gas_used: estimated_gas, error: None }
+    SimulationResult {
+        success: true,
+        return_values,
+        gas_used: estimated_gas,
+        error: None,
+    }
 }
 
 /// Simulate with state overrides for scenario comparison.
@@ -296,7 +352,11 @@ pub fn simulate(function: &str, args: &[u64]) -> SimulationResult {
 /// In native mode the overrides are ignored and a mock success result is
 /// returned, identical to [`simulate`] but with a slightly higher gas
 /// estimate to account for the override application cost.
-pub fn simulate_with_overrides(function: &str, args: &[u64], overrides: &[(&str, &[u8])]) -> SimulationResult {
+pub fn simulate_with_overrides(
+    function: &str,
+    args: &[u64],
+    overrides: &[(&str, &[u8])],
+) -> SimulationResult {
     let base = simulate(function, args);
     // Add 500 gas per override to model the cost of applying state patches.
     let override_cost = 500u64 * overrides.len() as u64;

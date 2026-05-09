@@ -27,7 +27,11 @@
 //! test runner calls. The `TestContext` communicates with the harness via host
 //! function imports (injected by the runner). In unit-test mode (`cargo test`),
 //! the same API uses mock implementations.
-use crate::alloc::{string::{String, ToString}, vec::Vec, format};
+use crate::alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 /// A reference to a deployed contract within the test harness.
 #[derive(Clone, Debug)]
@@ -88,16 +92,18 @@ impl Receipt {
     pub fn return_i32(&self) -> i32 {
         self.return_data
             .as_ref()
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(0)
+            .unwrap_or_else(|| panic!("receipt has no return data"))
+            .parse::<i32>()
+            .unwrap_or_else(|_| panic!("receipt return data is not an i32"))
     }
 
     /// Returns the return value as a u64, or panics.
     pub fn return_u64(&self) -> u64 {
         self.return_data
             .as_ref()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0)
+            .unwrap_or_else(|| panic!("receipt has no return data"))
+            .parse::<u64>()
+            .unwrap_or_else(|_| panic!("receipt return data is not a u64"))
     }
 }
 
@@ -111,12 +117,16 @@ pub struct QueryResult {
 impl QueryResult {
     /// Parse the return data as an i32.
     pub fn return_i32(&self) -> i32 {
-        self.return_data.parse::<i32>().unwrap_or(0)
+        self.return_data
+            .parse::<i32>()
+            .unwrap_or_else(|_| panic!("query return data is not an i32"))
     }
 
     /// Parse the return data as a u64.
     pub fn return_u64(&self) -> u64 {
-        self.return_data.parse::<u64>().unwrap_or(0)
+        self.return_data
+            .parse::<u64>()
+            .unwrap_or_else(|_| panic!("query return data is not a u64"))
     }
 
     /// Return the raw string data.
@@ -143,6 +153,34 @@ pub struct TestAccount {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SnapshotId(pub u64);
 
+#[derive(Clone, Debug)]
+struct NativeCallFixture {
+    contract_url: String,
+    function: String,
+    args: Vec<i64>,
+    receipt: Receipt,
+}
+
+#[derive(Clone, Debug)]
+struct NativeQueryFixture {
+    contract_url: String,
+    function: String,
+    args: Vec<i64>,
+    result: QueryResult,
+}
+
+#[derive(Clone, Debug)]
+struct TestContextSnapshot {
+    id: SnapshotId,
+    caller: TestAccount,
+    block_height: u64,
+    block_time: u64,
+    next_snapshot: u64,
+    deployments: Vec<ContractRef>,
+    call_fixtures: Vec<NativeCallFixture>,
+    query_fixtures: Vec<NativeQueryFixture>,
+}
+
 /// The central test context providing all testing operations.
 ///
 /// `TestContext` is the primary interface for test functions. It manages an
@@ -150,7 +188,8 @@ pub struct SnapshotId(pub u64);
 /// manipulation, and state snapshots.
 ///
 /// In WASM mode, operations dispatch to the Go test harness via host function
-/// imports. In native `cargo test` mode, a mock implementation is used.
+/// imports. In native `cargo test` mode, calls and queries must be registered
+/// explicitly as deterministic fixtures; unregistered behavior fails closed.
 pub struct TestContext {
     /// The currently active caller identity.
     pub caller: TestAccount,
@@ -164,6 +203,14 @@ pub struct TestContext {
     block_time: u64,
     /// Snapshot counter for save/restore.
     next_snapshot: u64,
+    /// Deployed contracts recorded by the native fixture harness.
+    deployments: Vec<ContractRef>,
+    /// One-shot call fixtures for native `cargo test` execution.
+    call_fixtures: Vec<NativeCallFixture>,
+    /// One-shot query fixtures for native `cargo test` execution.
+    query_fixtures: Vec<NativeQueryFixture>,
+    /// Captured snapshots for native `cargo test` execution.
+    snapshots: Vec<TestContextSnapshot>,
 }
 
 impl TestContext {
@@ -189,6 +236,10 @@ impl TestContext {
             block_height: 0,
             block_time: 1700000000, // arbitrary epoch
             next_snapshot: 0,
+            deployments: Vec::new(),
+            call_fixtures: Vec::new(),
+            query_fixtures: Vec::new(),
+            snapshots: Vec::new(),
         }
     }
 
@@ -219,10 +270,12 @@ impl TestContext {
     /// Deploy a contract at the given URL.
     ///
     /// In WASM mode this calls the `host_test_deploy` import.
-    /// In native test mode this is a mock that records the deployment.
+    /// In native test mode this records the deployment and returns its URL.
     pub fn deploy(&mut self, url: &str) -> ContractRef {
         self.block_height += 1;
-        ContractRef::new(url)
+        let contract = ContractRef::new(url);
+        self.deployments.push(contract.clone());
+        contract
     }
 
     /// Deploy a contract as a specific account.
@@ -233,20 +286,29 @@ impl TestContext {
     /// Execute a state-changing call on a contract.
     ///
     /// In WASM mode this calls `host_test_call`.
-    /// In native test mode this returns a mock success receipt.
+    /// In native test mode this consumes a matching registered fixture. Missing
+    /// fixtures return a failed receipt so tests cannot pass on fabricated
+    /// execution.
     pub fn call(&mut self, contract: &ContractRef, function: &str, args: &[i64]) -> Receipt {
         self.block_height += 1;
+        if let Some(index) = self.find_call_fixture(&contract.url, function, args) {
+            let mut receipt = self.call_fixtures.remove(index).receipt;
+            if receipt.block_height == 0 {
+                receipt.block_height = self.block_height;
+            }
+            return receipt;
+        }
+
         Receipt {
-            tx_hash: format!("mock_tx_{}_{}", contract.url, function),
-            status: "success".into(),
+            tx_hash: String::new(),
+            status: "failed".into(),
             gas_used: 0,
             block_height: self.block_height,
-            return_data: if args.is_empty() {
-                Some("0".into())
-            } else {
-                Some(format!("{}", args[0]))
-            },
-            error: None,
+            return_data: None,
+            error: Some(format!(
+                "no native call fixture registered for {}::{}({:?})",
+                contract.url, function, args
+            )),
             events: Vec::new(),
         }
     }
@@ -254,11 +316,120 @@ impl TestContext {
     /// Execute a read-only query on a contract.
     ///
     /// In WASM mode this calls `host_test_query`.
-    /// In native test mode this returns mock data.
-    pub fn query(&self, _contract: &ContractRef, _function: &str, _args: &[i64]) -> QueryResult {
-        QueryResult {
-            return_data: "0".into(),
+    /// In native test mode this consumes a matching registered fixture. Missing
+    /// fixtures panic so read-only assertions cannot pass on fabricated data.
+    pub fn query(&mut self, contract: &ContractRef, function: &str, args: &[i64]) -> QueryResult {
+        if let Some(index) = self.find_query_fixture(&contract.url, function, args) {
+            return self.query_fixtures.remove(index).result;
         }
+        panic!(
+            "no native query fixture registered for {}::{}({:?})",
+            contract.url, function, args
+        );
+    }
+
+    /// Register a one-shot native call fixture.
+    pub fn expect_call(
+        &mut self,
+        contract: &ContractRef,
+        function: &str,
+        args: &[i64],
+        receipt: Receipt,
+    ) {
+        self.call_fixtures.push(NativeCallFixture {
+            contract_url: contract.url.clone(),
+            function: function.into(),
+            args: args.to_vec(),
+            receipt,
+        });
+    }
+
+    /// Register a one-shot successful native call fixture.
+    pub fn expect_call_success(
+        &mut self,
+        contract: &ContractRef,
+        function: &str,
+        args: &[i64],
+        return_data: Option<&str>,
+        events: Vec<TestEvent>,
+    ) {
+        self.expect_call(
+            contract,
+            function,
+            args,
+            Receipt {
+                tx_hash: format!("fixture:{}:{}", contract.url, function),
+                status: "success".into(),
+                gas_used: 0,
+                block_height: 0,
+                return_data: return_data.map(String::from),
+                error: None,
+                events,
+            },
+        );
+    }
+
+    /// Register a one-shot failing native call fixture.
+    pub fn expect_call_failure(
+        &mut self,
+        contract: &ContractRef,
+        function: &str,
+        args: &[i64],
+        error: &str,
+    ) {
+        self.expect_call(
+            contract,
+            function,
+            args,
+            Receipt {
+                tx_hash: format!("fixture:{}:{}", contract.url, function),
+                status: "failed".into(),
+                gas_used: 0,
+                block_height: 0,
+                return_data: None,
+                error: Some(error.into()),
+                events: Vec::new(),
+            },
+        );
+    }
+
+    /// Register a one-shot native query fixture.
+    pub fn expect_query(
+        &mut self,
+        contract: &ContractRef,
+        function: &str,
+        args: &[i64],
+        return_data: &str,
+    ) {
+        self.query_fixtures.push(NativeQueryFixture {
+            contract_url: contract.url.clone(),
+            function: function.into(),
+            args: args.to_vec(),
+            result: QueryResult {
+                return_data: return_data.into(),
+            },
+        });
+    }
+
+    fn find_call_fixture(&self, contract_url: &str, function: &str, args: &[i64]) -> Option<usize> {
+        self.call_fixtures.iter().position(|fixture| {
+            fixture.contract_url == contract_url
+                && fixture.function == function
+                && fixture.args.as_slice() == args
+        })
+    }
+
+    fn find_query_fixture(
+        &self,
+        contract_url: &str,
+        function: &str,
+        args: &[i64],
+    ) -> Option<usize> {
+        self.query_fixtures.iter().position(|fixture| {
+            fixture.contract_url == contract_url
+                && fixture.function == function
+                && fixture.args.as_slice() == args
+        })
     }
 
     // ---- Time Travel ----
@@ -289,17 +460,38 @@ impl TestContext {
     /// Capture the current chain state so it can be restored later.
     pub fn snapshot(&mut self) -> SnapshotId {
         self.next_snapshot += 1;
-        SnapshotId(self.next_snapshot)
+        let id = SnapshotId(self.next_snapshot);
+        self.snapshots.push(TestContextSnapshot {
+            id,
+            caller: self.caller.clone(),
+            block_height: self.block_height,
+            block_time: self.block_time,
+            next_snapshot: self.next_snapshot,
+            deployments: self.deployments.clone(),
+            call_fixtures: self.call_fixtures.clone(),
+            query_fixtures: self.query_fixtures.clone(),
+        });
+        id
     }
 
     /// Restore the chain to a previously captured snapshot.
     ///
-    /// In native test mode this is a no-op (state is not tracked).
+    /// In native test mode this restores the recorded test context state.
     /// In WASM mode the harness restores linear memory.
-    pub fn restore(&mut self, _snap: SnapshotId) {
-        // In native mode, snapshot/restore is a no-op placeholder.
-        // The real implementation runs in the Go test harness when
-        // the WASM module calls host_test_restore.
+    pub fn restore(&mut self, snap: SnapshotId) {
+        let snapshot = self
+            .snapshots
+            .iter()
+            .find(|snapshot| snapshot.id == snap)
+            .unwrap_or_else(|| panic!("unknown snapshot id {}", snap.0))
+            .clone();
+        self.caller = snapshot.caller;
+        self.block_height = snapshot.block_height;
+        self.block_time = snapshot.block_time;
+        self.next_snapshot = snapshot.next_snapshot;
+        self.deployments = snapshot.deployments;
+        self.call_fixtures = snapshot.call_fixtures;
+        self.query_fixtures = snapshot.query_fixtures;
     }
 }
 
@@ -345,10 +537,7 @@ macro_rules! assert_reverts {
         );
     };
     ($receipt:expr, $msg:expr) => {
-        assert!(
-            $receipt.is_failure(),
-            "expected revert, but call succeeded"
-        );
+        assert!($receipt.is_failure(), "expected revert, but call succeeded");
         let err = $receipt.error.as_deref().unwrap_or("");
         assert!(
             err.contains($msg),
@@ -366,15 +555,112 @@ macro_rules! assert_reverts {
 /// ```
 #[macro_export]
 macro_rules! assert_event {
-    ($receipt:expr, $name:expr) => {
-        // In the current implementation, events are not tracked in the
-        // native Receipt type (they're in the Go harness). This macro
-        // is a placeholder that will be implemented when WASM host
-        // functions provide event data.
-        let _ = ($receipt, $name);
-    };
+    ($receipt:expr, $name:expr) => {{
+        let receipt = &$receipt;
+        assert!(
+            receipt.events.iter().any(|event| event.name == $name),
+            "expected event {:?}",
+            $name
+        );
+    }};
 }
 
 // ---- Re-exports for convenience ----
 
 pub use crate::{assert_event, assert_reverts, assert_success};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_call_without_fixture_fails_closed() {
+        let mut ctx = TestContext::new();
+        let contract = ctx.deploy("acc://test.acme/counter");
+        let receipt = ctx.call(&contract, "increment", &[]);
+
+        assert!(receipt.is_failure());
+        assert!(receipt
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("no native call fixture registered"));
+    }
+
+    #[test]
+    fn native_call_and_query_use_explicit_one_shot_fixtures() {
+        let mut ctx = TestContext::new();
+        let contract = ctx.deploy("acc://test.acme/counter");
+
+        ctx.expect_call_success(
+            &contract,
+            "increment",
+            &[1],
+            Some("2"),
+            vec![TestEvent {
+                name: "Incremented".into(),
+                data: vec![2],
+            }],
+        );
+        ctx.expect_query(&contract, "get", &[], "2");
+
+        let receipt = ctx.call(&contract, "increment", &[1]);
+        assert_success!(receipt);
+        assert_event!(receipt, "Incremented");
+        assert_eq!(receipt.return_i32(), 2);
+
+        let query = ctx.query(&contract, "get", &[]);
+        assert_eq!(query.return_u64(), 2);
+
+        let missing = ctx.call(&contract, "increment", &[1]);
+        assert!(missing.is_failure());
+    }
+
+    #[test]
+    fn native_query_without_fixture_panics() {
+        let mut ctx = TestContext::new();
+        let contract = ctx.deploy("acc://test.acme/counter");
+        assert!(std::panic::catch_unwind(move || {
+            let _ = ctx.query(&contract, "get", &[]);
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn snapshot_restore_restores_native_fixture_state() {
+        let mut ctx = TestContext::new();
+        let contract = ctx.deploy("acc://test.acme/counter");
+        ctx.expect_query(&contract, "get", &[], "7");
+        let snap = ctx.snapshot();
+
+        let first = ctx.query(&contract, "get", &[]);
+        assert_eq!(first.return_i32(), 7);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.query(&contract, "get", &[]);
+        }))
+        .is_err());
+
+        ctx.restore(snap);
+        let restored = ctx.query(&contract, "get", &[]);
+        assert_eq!(restored.return_i32(), 7);
+    }
+
+    #[test]
+    fn return_parsers_panic_on_missing_or_invalid_data() {
+        let missing = Receipt {
+            tx_hash: String::new(),
+            status: "success".into(),
+            gas_used: 0,
+            block_height: 0,
+            return_data: None,
+            error: None,
+            events: Vec::new(),
+        };
+        assert!(std::panic::catch_unwind(|| missing.return_i32()).is_err());
+
+        let invalid = QueryResult {
+            return_data: "not-a-number".into(),
+        };
+        assert!(std::panic::catch_unwind(|| invalid.return_u64()).is_err());
+    }
+}

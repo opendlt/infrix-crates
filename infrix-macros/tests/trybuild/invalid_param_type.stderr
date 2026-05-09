@@ -1,0 +1,7 @@
+error: unsupported shape parameter type: f64
+ --> tests/trybuild/invalid_param_type.rs:1:1
+  |
+1 | #[infrix_macros::shapes(default = "alpha")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `infrix_macros::shapes` (in Nightly builds, run with -Z macro-backtrace for more info)

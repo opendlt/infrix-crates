@@ -17,7 +17,11 @@
 //! // Public state is plaintext (configured via visibility policy).
 //! shadow::set("total_supply", &1000000u64.to_le_bytes());
 //! ```
-use crate::alloc::{string::{String, ToString}, vec::Vec, format};
+use crate::alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 /// Visibility levels for storage keys.
 pub mod visibility {

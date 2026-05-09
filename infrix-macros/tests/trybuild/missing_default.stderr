@@ -1,0 +1,5 @@
+error: #[shapes] requires default = "shape_name"
+ --> tests/trybuild/missing_default.rs:2:10
+  |
+2 | pub enum Shape {
+  |          ^^^^^
