@@ -24,7 +24,7 @@
 extern crate alloc;
 
 #[cfg(feature = "alloc")]
-use alloc::{string::String, vec::Vec};
+use alloc::string::String;
 
 /// 256-bit unsigned integer
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -194,10 +194,9 @@ impl U256 {
         if other.high == 0 {
             let divisor = other.low;
             let mut quotient = Self::ZERO;
-            let mut remainder: u128 = 0;
 
             // Process high bits
-            remainder = self.high % divisor;
+            let mut remainder: u128 = self.high % divisor;
             quotient.high = self.high / divisor;
 
             // Process low bits with remainder
@@ -1690,7 +1689,7 @@ mod tests {
         let zero = Hash::zero();
         assert!(zero.is_zero());
 
-        let mut h = Hash::from([1u8; 32]);
+        let h = Hash::from([1u8; 32]);
         assert!(!h.is_zero());
         assert_eq!(h.as_bytes()[0], 1);
     }

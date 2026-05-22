@@ -22,11 +22,7 @@
 //! // List swarm members
 //! let members = swarm::members()?;
 //! ```
-use crate::alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use crate::alloc::{string::String, vec::Vec};
 
 /// Swarm error types.
 #[derive(Debug)]

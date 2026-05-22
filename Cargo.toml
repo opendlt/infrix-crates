@@ -16,3 +16,9 @@ repository = "https://github.com/AccumulateNetwork/infrix"
 infrix-types = { path = "infrix-types" }
 infrix-macros = { path = "infrix-macros" }
 infrix-sdk = { path = "infrix-sdk" }
+
+# AUDIT_FINDINGS_2026-05-21 #17 closure: the warning set is zero after the
+# wire-or-delete sweep; lock it in by promoting warnings to errors at the
+# workspace level so any regression fails CI rather than accumulating.
+[workspace.lints.rust]
+warnings = "deny"

@@ -58,11 +58,11 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
     parse::{Parse, ParseStream},
-    parse_macro_input, parse_quote,
+    parse_macro_input,
     punctuated::Punctuated,
     spanned::Spanned,
-    Attribute, Block, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct, Lit,
-    LitInt, LitStr, Meta, Pat, PatType, ReturnType, Signature, Token, Type, Visibility,
+    Attribute, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct, Lit,
+    LitInt, LitStr, Meta, Pat, ReturnType, Token, Type,
 };
 
 mod governance_macros;
@@ -262,7 +262,7 @@ fn generate_encoding_impl(input: &ItemStruct) -> syn::Result<TokenStream2> {
     let mut field_names = Vec::new();
 
     if let syn::Fields::Named(fields) = &input.fields {
-        for (i, field) in fields.named.iter().enumerate() {
+        for (_i, field) in fields.named.iter().enumerate() {
             let field_name = field.ident.as_ref().unwrap();
             let field_type = &field.ty;
             field_names.push(field_name.clone());
@@ -961,7 +961,7 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
         }
     }).collect();
 
-    let init_dispatch = if let Some(init_name) = init_fn {
+    let init_dispatch = if init_fn.is_some() {
         quote! {
             if selector == 0 {
                 return <#self_ty>::__init_wrapper(&input[4..]).map(|_| ::infrix_sdk::infrix_types::CallResult::empty());
