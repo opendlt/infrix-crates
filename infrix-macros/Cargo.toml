@@ -17,5 +17,8 @@ quote = "1.0"
 syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 
 [dev-dependencies]
-infrix-types = { path = "../infrix-types" }
+# AUDIT_RECHECK_2026-05-22_ROUND2 P1 closure: path-only dependencies
+# trigger a `cargo publish --dry-run` warning even when the dep is a
+# dev-dependency. Pin the registry version alongside the path.
+infrix-types = { path = "../infrix-types", version = "0.1.0" }
 trybuild = "1.0"

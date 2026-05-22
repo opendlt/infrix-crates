@@ -17,8 +17,13 @@ std = ["alloc", "infrix-types/std"]
 alloc = ["infrix-types/alloc"]
 
 [dependencies]
-infrix-types = { path = "../infrix-types" }
-infrix-macros = { path = "../infrix-macros" }
+# AUDIT_RECHECK_2026-05-22_ROUND2 P1 closure: path-only dependencies fail
+# `cargo publish` because crates.io requires every dependency to expose a
+# registry `version`. Pinning to the current workspace version keeps the
+# crate publishable while the path entry continues to win for local
+# workspace builds.
+infrix-types = { path = "../infrix-types", version = "0.1.0" }
+infrix-macros = { path = "../infrix-macros", version = "0.1.0" }
 
 # P0-003 (2026-05-02): real crypto for the std/test mock host.
 # wasm32 builds (the actual contract surface) keep the host import
