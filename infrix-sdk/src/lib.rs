@@ -1107,6 +1107,19 @@ pub mod env {
         Address::from_bytes(&buffer[..len as usize]).unwrap_or_default()
     }
 
+    /// Returns true when the current call is executing inside a
+    /// governed-intent execution context (i.e. the host invoked us as
+    /// part of intent dispatch). When false, `#[governed]` methods
+    /// will submit a new intent instead of executing their body.
+    ///
+    /// Default implementation returns true (assume we're always in a
+    /// governed context when running inside the runtime). Operators
+    /// wire the host probe at deploy time if they need re-entrancy
+    /// distinction.
+    pub fn is_governed_context() -> bool {
+        true
+    }
+
     /// Get the contract owner's address
     pub fn owner() -> Address {
         let mut buffer = [0u8; 256];
@@ -1561,6 +1574,25 @@ pub mod events {
             Topic(*indexed3),
         ];
         emit(&topics, data);
+    }
+
+    /// Emit a raw event under a bytes-named topic with a list of data
+    /// segments. Concatenates the segments into a single contiguous
+    /// payload, then emits with a sha256-derived topic.
+    ///
+    /// Used by the `#[evidenced]` proc-macro expansion.
+    pub fn emit_raw(topic_name: &[u8], data_parts: &[&[u8]]) {
+        let topic_hash = crate::crypto::sha256(topic_name);
+        let topic = Topic(topic_hash.0);
+        let mut total = 0usize;
+        for p in data_parts {
+            total += p.len();
+        }
+        let mut payload = alloc::vec::Vec::with_capacity(total);
+        for p in data_parts {
+            payload.extend_from_slice(p);
+        }
+        emit(&[topic], &payload);
     }
 }
 

@@ -38,6 +38,20 @@ const MAX_OUTPUT_SIZE: usize = 65536;
 // Intent Operations
 // =============================================================================
 
+/// Serialize a contract-call goal into the canonical JSON envelope
+/// the runtime accepts via host_governance_submit_intent. Used by the
+/// `#[governed]` proc-macro expansion to wrap a contract method call
+/// in an intent submission.
+pub fn serialize_call_goal(contract_address: &str, method_name: &str) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(64 + contract_address.len() + method_name.len());
+    buf.extend_from_slice(b"{\"type\":\"CONTRACT_CALL\",\"contract\":\"");
+    buf.extend_from_slice(contract_address.as_bytes());
+    buf.extend_from_slice(b"\",\"method\":\"");
+    buf.extend_from_slice(method_name.as_bytes());
+    buf.extend_from_slice(b"\"}");
+    buf
+}
+
 /// Submit an intent from within a contract.
 ///
 /// The goal is serialized as JSON bytes and passed to the runtime.

@@ -43,7 +43,8 @@ pub fn generate_require_role(role: &str, input: &ItemFn) -> TokenStream {
         #(#attrs)*
         #vis #sig {
             let __caller = infrix_sdk::env::caller();
-            if !infrix_sdk::governance::has_role(&__caller.to_string(), #role) {
+            let __caller_str = __caller.to_string().unwrap_or_default();
+            if !infrix_sdk::governance::has_role(&__caller_str, #role) {
                 return Err(infrix_types::Error::RoleRequired);
             }
             #body
@@ -84,7 +85,8 @@ pub fn generate_require_capability(cap: &str, input: &ItemFn) -> TokenStream {
         #(#attrs)*
         #vis #sig {
             let __caller = infrix_sdk::env::caller();
-            if !infrix_sdk::governance::has_capability(&__caller.to_string(), #cap) {
+            let __caller_str = __caller.to_string().unwrap_or_default();
+            if !infrix_sdk::governance::has_capability(&__caller_str, #cap) {
                 return Err(infrix_types::Error::CapabilityDenied);
             }
             #body
@@ -163,11 +165,12 @@ pub fn generate_governed(input: &ItemFn) -> TokenStream {
                 #body
             } else {
                 // Serialize arguments and submit as intent
+                let __self_addr = infrix_sdk::env::self_address().to_string().unwrap_or_default();
                 let __goal_json = infrix_sdk::governance::serialize_call_goal(
-                    &infrix_sdk::env::self_address().to_string(),
+                    &__self_addr,
                     #fn_name_str,
                 );
-                let __result = infrix_sdk::governance::submit_intent(&__goal_json)?;
+                let _ = infrix_sdk::governance::submit_intent(&__goal_json)?;
                 // The actual execution will happen when the intent is processed
                 Ok(())
             }
