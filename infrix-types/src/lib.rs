@@ -190,7 +190,8 @@ impl U256 {
             return Some(Self::ZERO);
         }
 
-        // Simplified: for now, handle case where divisor fits in u128
+        // Fast path: the divisor fits in u128 (high limb is zero); the
+        // full 256-bit binary long division below handles the rest.
         if other.high == 0 {
             let divisor = other.low;
             let mut quotient = Self::ZERO;

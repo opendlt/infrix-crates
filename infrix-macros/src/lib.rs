@@ -663,9 +663,11 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
     // Calculate event signature hash
     let event_signature = calculate_selector(&struct_name_str);
 
-    // Find indexed fields
+    // Find indexed fields (and record every field, in declaration
+    // order, for the event schema JSON).
     let mut indexed_fields = Vec::new();
     let mut data_fields = Vec::new();
+    let mut schema_fields: Vec<(String, String, bool)> = Vec::new();
 
     if let syn::Fields::Named(fields) = &input.fields {
         for field in &fields.named {
@@ -677,6 +679,12 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
                 .iter()
                 .any(|attr| attr.path().is_ident("indexed"));
 
+            schema_fields.push((
+                field_name.to_string(),
+                rust_type_to_schema(field_type),
+                is_indexed,
+            ));
+
             if is_indexed {
                 indexed_fields.push((field_name.clone(), field_type.clone()));
             } else {
@@ -684,6 +692,24 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
             }
         }
     }
+
+    // MARKER-AUDIT 2026-06-10 closure: pre-audit, #[event] structs were
+    // silently absent from the embedded contract schema ("We pass empty
+    // for Phase 2"). A proc macro cannot see sibling items, so each
+    // event embeds its own schema object into the shared
+    // `infrix:events` WASM custom section (the linker concatenates
+    // same-named sections → newline-delimited JSON). Schema consumers
+    // (cmd/infrix abi extraction) merge these into the contract ABI's
+    // events list alongside the `infrix:schema` section.
+    let event_schema_json = build_event_schema_json(&struct_name_str, &schema_fields);
+    let mut event_schema_line = event_schema_json.clone();
+    event_schema_line.push('\n');
+    let event_schema_bytes = event_schema_line.as_bytes();
+    let event_schema_len = event_schema_bytes.len();
+    let event_section_static = format_ident!(
+        "__INFRIX_EVENT_SCHEMA_{}",
+        struct_name_str.to_uppercase()
+    );
 
     // Generate topic encoding
     let topic_count = indexed_fields.len() + 1; // +1 for event signature
@@ -727,12 +753,23 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
             #(#filtered_fields),*
         }
 
+        #[cfg(target_arch = "wasm32")]
+        #[link_section = "infrix:events"]
+        #[used]
+        #[doc(hidden)]
+        #visibility static #event_section_static: [u8; #event_schema_len] = [#(#event_schema_bytes),*];
+
         impl #struct_name {
             /// Event signature hash
             pub const SIGNATURE: u32 = #event_signature;
 
             /// Number of indexed topics
             pub const TOPIC_COUNT: usize = #topic_count;
+
+            /// Canonical event schema JSON — the same object shape as
+            /// the `events` entries of the `infrix:schema` section,
+            /// embedded into the `infrix:events` WASM custom section.
+            pub const EVENT_SCHEMA_JSON: &'static str = #event_schema_json;
 
             /// Emit this event
             pub fn emit(&self) -> Result<(), ::infrix_sdk::infrix_types::Error> {
@@ -762,13 +799,22 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
 
 /// Generates storage mapping helpers.
 ///
-/// This attribute generates getter/setter functions for mapping storage.
+/// The annotated alias must have the exact shape
+/// `type Name = StorageMap<K, V>;` — the declared key and value types
+/// are bound into the generated accessors (`get(&K) -> Option<V>`,
+/// `set(&K, &V)`, `remove(&K)`, `contains(&K)`), and any other shape
+/// is a compile error. The alias target is a declaration-only marker;
+/// the macro replaces it with a zero-sized struct carrying the typed
+/// accessors.
 ///
 /// # Example
 ///
 /// ```ignore
 /// #[storage_map(name = "balances")]
 /// type Balances = StorageMap<Address, U256>;
+///
+/// Balances::set(&owner, &amount)?;
+/// let balance: Option<U256> = Balances::get(&owner);
 /// ```
 #[proc_macro_attribute]
 pub fn storage_map(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -814,69 +860,101 @@ impl Parse for StorageMapArgs {
     }
 }
 
+// extract_storage_map_kv pulls the declared key and value types out of
+// a `type Name = StorageMap<K, V>;` alias. MARKER-AUDIT 2026-06-10
+// closure: pre-audit the macro silently ignored the declared generics
+// and generated an untyped `impl Encode`/`impl Decode` wrapper — a
+// caller could pass any key type and the value type was uninferable.
+// A declaration that is not exactly `StorageMap<K, V>` is now a
+// compile error rather than a silently weaker wrapper.
+fn extract_storage_map_kv(input: &syn::ItemType) -> syn::Result<(Type, Type)> {
+    let err = || {
+        syn::Error::new_spanned(
+            &input.ty,
+            "storage_map: the aliased type must be StorageMap<K, V> \
+             (e.g. `type Balances = StorageMap<Address, U256>;`)",
+        )
+    };
+    let Type::Path(type_path) = input.ty.as_ref() else {
+        return Err(err());
+    };
+    let Some(last) = type_path.path.segments.last() else {
+        return Err(err());
+    };
+    if last.ident != "StorageMap" {
+        return Err(err());
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return Err(err());
+    };
+    let mut types = args.args.iter().filter_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t.clone()),
+        _ => None,
+    });
+    let (Some(key_ty), Some(value_ty), None) = (types.next(), types.next(), types.next()) else {
+        return Err(err());
+    };
+    Ok((key_ty, value_ty))
+}
+
 fn generate_storage_map(args: StorageMapArgs, input: syn::ItemType) -> syn::Result<TokenStream2> {
     let type_name = &input.ident;
+    let visibility = &input.vis;
     let storage_prefix = args.name;
 
-    // Extract key and value types from StorageMap<K, V>
-    // For now, generate a simple wrapper
+    // Bind the declared StorageMap<K, V> generics (fail-loud on any
+    // other shape) so the generated accessors are typed end-to-end.
+    let (key_ty, value_ty) = extract_storage_map_kv(&input)?;
 
+    // The alias target `StorageMap<K, V>` is a declaration-only marker
+    // (no such generic runtime type exists); emit a zero-sized struct
+    // carrying the typed accessors instead of re-emitting the alias.
     Ok(quote! {
-        #input
+        #visibility struct #type_name;
 
         impl #type_name {
             /// Storage prefix for this map
             pub const PREFIX: &'static str = #storage_prefix;
 
-            /// Get a value from the map
-            pub fn get(key: &impl ::infrix_sdk::infrix_types::Encode) -> Option<impl ::infrix_sdk::infrix_types::Decode> {
+            fn __build_key(key: &#key_ty, storage_key: &mut [u8; 512]) -> Result<usize, ::infrix_sdk::infrix_types::Error> {
                 let mut key_buf = [0u8; 256];
-                let key_len = ::infrix_sdk::infrix_types::Encode::encode(key, &mut key_buf).ok()?;
-
-                let mut storage_key = [0u8; 512];
+                let key_len = ::infrix_sdk::infrix_types::Encode::encode(key, &mut key_buf)?;
                 let prefix_bytes = Self::PREFIX.as_bytes();
                 storage_key[..prefix_bytes.len()].copy_from_slice(prefix_bytes);
                 storage_key[prefix_bytes.len()..prefix_bytes.len() + key_len]
                     .copy_from_slice(&key_buf[..key_len]);
+                Ok(prefix_bytes.len() + key_len)
+            }
 
-                let data = ::infrix_sdk::storage::get(&storage_key[..prefix_bytes.len() + key_len])?;
-                ::infrix_sdk::infrix_types::Decode::decode(&data).ok()
+            /// Get a value from the map
+            pub fn get(key: &#key_ty) -> Option<#value_ty> {
+                let mut storage_key = [0u8; 512];
+                let total_len = Self::__build_key(key, &mut storage_key).ok()?;
+                ::infrix_sdk::storage::get_decoded::<#value_ty>(&storage_key[..total_len])
             }
 
             /// Set a value in the map
-            pub fn set(key: &impl ::infrix_sdk::infrix_types::Encode, value: &impl ::infrix_sdk::infrix_types::Encode) -> Result<(), ::infrix_sdk::infrix_types::Error> {
-                let mut key_buf = [0u8; 256];
-                let key_len = ::infrix_sdk::infrix_types::Encode::encode(key, &mut key_buf)?;
-
+            pub fn set(key: &#key_ty, value: &#value_ty) -> Result<(), ::infrix_sdk::infrix_types::Error> {
                 let mut storage_key = [0u8; 512];
-                let prefix_bytes = Self::PREFIX.as_bytes();
-                storage_key[..prefix_bytes.len()].copy_from_slice(prefix_bytes);
-                storage_key[prefix_bytes.len()..prefix_bytes.len() + key_len]
-                    .copy_from_slice(&key_buf[..key_len]);
-
-                let mut value_buf = [0u8; 4096];
-                let value_len = ::infrix_sdk::infrix_types::Encode::encode(value, &mut value_buf)?;
-
-                ::infrix_sdk::storage::set(
-                    &storage_key[..prefix_bytes.len() + key_len],
-                    &value_buf[..value_len]
-                );
-                Ok(())
+                let total_len = Self::__build_key(key, &mut storage_key)?;
+                ::infrix_sdk::storage::set_encoded(&storage_key[..total_len], value)
             }
 
             /// Remove a value from the map
-            pub fn remove(key: &impl ::infrix_sdk::infrix_types::Encode) -> Result<(), ::infrix_sdk::infrix_types::Error> {
-                let mut key_buf = [0u8; 256];
-                let key_len = ::infrix_sdk::infrix_types::Encode::encode(key, &mut key_buf)?;
-
+            pub fn remove(key: &#key_ty) -> Result<(), ::infrix_sdk::infrix_types::Error> {
                 let mut storage_key = [0u8; 512];
-                let prefix_bytes = Self::PREFIX.as_bytes();
-                storage_key[..prefix_bytes.len()].copy_from_slice(prefix_bytes);
-                storage_key[prefix_bytes.len()..prefix_bytes.len() + key_len]
-                    .copy_from_slice(&key_buf[..key_len]);
-
-                ::infrix_sdk::storage::delete(&storage_key[..prefix_bytes.len() + key_len]);
+                let total_len = Self::__build_key(key, &mut storage_key)?;
+                ::infrix_sdk::storage::delete(&storage_key[..total_len]);
                 Ok(())
+            }
+
+            /// Check whether a key exists in the map
+            pub fn contains(key: &#key_ty) -> bool {
+                let mut storage_key = [0u8; 512];
+                match Self::__build_key(key, &mut storage_key) {
+                    Ok(total_len) => ::infrix_sdk::storage::has(&storage_key[..total_len]),
+                    Err(_) => false,
+                }
             }
         }
     })
@@ -1335,6 +1413,28 @@ fn build_schema_json(
     json
 }
 
+/// Builds a single-line JSON object describing one event — identical
+/// in shape to the `events` entries of `build_schema_json`, so the
+/// `infrix:events` custom section (one object per line) merges
+/// directly into the contract ABI's events list.
+fn build_event_schema_json(name: &str, fields: &[(String, String, bool)]) -> String {
+    let mut json = String::new();
+    json.push_str(&format!("{{\"name\":\"{}\",\"fields\":[", escape_json(name)));
+    for (i, (fname, ftype, indexed)) in fields.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            "{{\"name\":\"{}\",\"type\":\"{}\",\"indexed\":{}}}",
+            escape_json(fname),
+            escape_json(ftype),
+            indexed
+        ));
+    }
+    json.push_str("]}");
+    json
+}
+
 fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -1383,8 +1483,14 @@ fn generate_schema_section(self_ty: &Type, input: &ItemImpl) -> TokenStream2 {
         }
     }
 
-    // For now, events are not collected here (they're separate #[event] structs).
-    // A global event registry would be needed. We pass empty for Phase 2.
+    // Events are declared as separate #[event] structs, and a proc
+    // macro cannot see sibling items — so events are NOT embedded here.
+    // MARKER-AUDIT 2026-06-10 closure: each #[event] struct embeds its
+    // own schema object into the `infrix:events` WASM custom section
+    // (see generate_event); schema consumers merge that section's
+    // newline-delimited objects into this schema's events list. The
+    // `events` key is therefore intentionally absent from the
+    // `infrix:schema` payload emitted by this macro.
     let events: Vec<(String, Vec<(String, String, bool)>)> = Vec::new();
 
     let schema_json = build_schema_json(&contract_name, &functions, &events);
@@ -1499,6 +1605,61 @@ mod tests {
         assert_eq!(escape_json("hello"), "hello");
         assert_eq!(escape_json("hello \"world\""), "hello \\\"world\\\"");
         assert_eq!(escape_json("line1\nline2"), "line1\\nline2");
+    }
+
+    // MARKER-AUDIT 2026-06-10 closure: per-event schema objects must be
+    // valid single-line JSON in the same shape as the schema's events
+    // entries, so the infrix:events section merges into the ABI.
+    #[test]
+    fn test_build_event_schema_json() {
+        let fields = vec![
+            ("from".to_string(), "address".to_string(), true),
+            ("to".to_string(), "address".to_string(), true),
+            ("amount".to_string(), "u256".to_string(), false),
+        ];
+        let json = build_event_schema_json("Transfer", &fields);
+        assert_eq!(
+            json,
+            "{\"name\":\"Transfer\",\"fields\":[\
+             {\"name\":\"from\",\"type\":\"address\",\"indexed\":true},\
+             {\"name\":\"to\",\"type\":\"address\",\"indexed\":true},\
+             {\"name\":\"amount\",\"type\":\"u256\",\"indexed\":false}]}"
+        );
+        assert!(!json.contains('\n'), "must be single-line for NDJSON merging");
+    }
+
+    // MARKER-AUDIT 2026-06-10 closure: the declared StorageMap<K, V>
+    // generics must be extracted (typed accessors), and any other alias
+    // shape must be a compile error rather than an untyped wrapper.
+    #[test]
+    fn test_extract_storage_map_kv() {
+        let item: syn::ItemType =
+            syn::parse_str("type Balances = StorageMap<Address, U256>;").unwrap();
+        let (k, v) = extract_storage_map_kv(&item).unwrap();
+        assert_eq!(quote!(#k).to_string(), "Address");
+        assert_eq!(quote!(#v).to_string(), "U256");
+
+        // Fully-qualified path also works (last segment matters).
+        let item: syn::ItemType =
+            syn::parse_str("type B = infrix_sdk::StorageMap<u64, String>;").unwrap();
+        let (k, v) = extract_storage_map_kv(&item).unwrap();
+        assert_eq!(quote!(#k).to_string(), "u64");
+        assert_eq!(quote!(#v).to_string(), "String");
+
+        // Wrong shapes fail loud.
+        for bad in [
+            "type B = StorageMap;",
+            "type B = StorageMap<u64>;",
+            "type B = StorageMap<u64, String, bool>;",
+            "type B = Vec<u8>;",
+            "type B = (u64, String);",
+        ] {
+            let item: syn::ItemType = syn::parse_str(bad).unwrap();
+            assert!(
+                extract_storage_map_kv(&item).is_err(),
+                "expected error for {bad}"
+            );
+        }
     }
 }
 
