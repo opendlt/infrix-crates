@@ -101,7 +101,7 @@ pub enum IntentGoalType {
 
 impl IntentGoalType {
     /// Returns the canonical wire-format string for this goal type.
-    /// Matches the string values declared in `modules/infrix-schema/intent/types.go`
+    /// Matches the string values declared in `infrix-schema/intent/types.go`
     /// exactly. Generated from the Go source of truth — do not
     /// hand-edit; run `go run ./cmd/sdkgen` after changing the Go enum.
     pub fn as_str(&self) -> &'static str {
