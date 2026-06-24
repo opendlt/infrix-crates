@@ -103,7 +103,7 @@ impl IntentGoalType {
     /// Returns the canonical wire-format string for this goal type.
     /// Matches the string values declared in `infrix-schema/intent/types.go`
     /// exactly. Generated from the Go source of truth — do not
-    /// hand-edit; run `go run ./cmd/sdkgen` after changing the Go enum.
+    /// hand-edit; run `go run .` in tools/sdkgen after changing the schema.
     pub fn as_str(&self) -> &'static str {
         match self {
             IntentGoalType::Convert => "CONVERT",
