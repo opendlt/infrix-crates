@@ -1,6 +1,6 @@
 # infrix-crates
 
-**The Rust SDK for authoring [Infrix](https://github.com/opendlt/infrix-accumen) smart contracts.**
+**The Rust SDK for authoring [Infrix](https://github.com/opendlt) smart contracts.**
 
 This repo is the Cargo workspace extracted from the Infrix monorepo. It holds the
 crates a contract author depends on to write WASM contracts that run on the
