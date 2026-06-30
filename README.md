@@ -2,6 +2,10 @@
 
 **The Rust SDK for authoring [Infrix](https://github.com/opendlt) smart contracts.**
 
+> **Infrix — governed, verifiable execution on Accumulate.** New here? Start at
+> [infrix.opendlt.org](https://infrix.opendlt.org) · try it live at
+> [play.infrix.opendlt.org](https://play.infrix.opendlt.org).
+
 This repo is the Cargo workspace extracted from the Infrix monorepo. It holds the
 crates a contract author depends on to write WASM contracts that run on the
 Infrix governed execution layer, published to [crates.io](https://crates.io)
