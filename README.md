@@ -13,11 +13,17 @@ under the `infrix-*` names.
 
 ## Crates
 
-| Crate | crates.io | What it is |
-|-------|-----------|------------|
-| [`infrix-types`](https://crates.io/crates/infrix-types) | v0.1.0 | Core types for Infrix smart contracts (governance, ABI, the canonical `IntentGoalType` enum) |
-| [`infrix-macros`](https://crates.io/crates/infrix-macros) | v0.1.0 | Procedural macros (`#[contract]`, ABI schema-section generation, selector calculation) |
-| [`infrix-sdk`](https://crates.io/crates/infrix-sdk) | v0.1.0 | The contract-authoring SDK: host-function bindings, storage, the `prelude` |
+| Crate | Docs | What it is |
+|-------|------|------------|
+| [`infrix-types`](./infrix-types/README.md) | [crates.io](https://crates.io/crates/infrix-types) | Core types for Infrix smart contracts (governance, ABI, the canonical `IntentGoalType` enum) |
+| [`infrix-macros`](./infrix-macros/README.md) | [crates.io](https://crates.io/crates/infrix-macros) | Procedural macros (`#[contract]`, `#[call]`/`#[view]`/`#[init]`, governance + ABI generation) |
+| [`infrix-sdk`](./infrix-sdk/README.md) | [crates.io](https://crates.io/crates/infrix-sdk) | The contract-authoring SDK: host bindings, storage, token standards, the `prelude` |
+
+## Examples
+
+- [`examples/counter`](./examples/counter) — the canonical governed counter
+  contract, verified to compile to `wasm32-unknown-unknown`. Copy it as your
+  starting point.
 
 ## Use it
 

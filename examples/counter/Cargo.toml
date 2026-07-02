@@ -1,0 +1,16 @@
+[package]
+name = "counter"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The canonical Infrix contract example: a governed on-chain counter."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+infrix-sdk = { path = "../../infrix-sdk" }
+
+# Standalone example: its own workspace root so it is NOT a member of the parent
+# infrix-crates workspace (which denies warnings and builds for the host target).
+[workspace]
