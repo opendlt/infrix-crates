@@ -135,6 +135,11 @@ pub mod prelude {
     pub use crate::governance;
     pub use crate::l0;
     pub use crate::storage;
+
+    // Reusable, composable components (the OpenZeppelin analogs) — DX P6-2.
+    pub use crate::access;   // Ownable, AccessControl
+    pub use crate::security; // Pausable
+    pub use crate::tokens;   // acu20::{Token, Acu20}, acu721, acu1155
 }
 
 // =============================================================================
@@ -1884,6 +1889,126 @@ pub mod tokens {
                 amount: &U256,
             ) -> Result<bool, Error>;
         }
+
+        /// A ready-to-use, storage-backed ACU-20 fungible token — the
+        /// OpenZeppelin `ERC20` analog. **Compose it** in your contract: hold an
+        /// `Acu20`, `mint` an initial supply in your `#[init]`, and delegate the
+        /// standard methods. It implements [`Token`] against the canonical
+        /// `StorageMap` (balances/allowances/supply), with checked arithmetic
+        /// (overflow/underflow → typed `Error`).
+        ///
+        /// ```ignore
+        /// use infrix_sdk::prelude::*;
+        /// use infrix_sdk::tokens::acu20::Acu20;
+        ///
+        /// #[contract]
+        /// struct MyToken;
+        /// #[contract_impl]
+        /// impl MyToken {
+        ///     #[init]
+        ///     fn init(&mut self, supply: U256) -> Result<(), Error> {
+        ///         Acu20::new("MyToken", "MTK", 18).mint(&env::caller(), &supply)
+        ///     }
+        ///     #[call]
+        ///     fn transfer(&mut self, to: Address, amount: U256) -> Result<bool, Error> {
+        ///         Acu20::new("MyToken", "MTK", 18).transfer(&to, &amount)
+        ///     }
+        /// }
+        /// ```
+        pub struct Acu20 {
+            token_name: &'static str,
+            token_symbol: &'static str,
+            token_decimals: u8,
+        }
+
+        impl Acu20 {
+            const BAL: &'static [u8] = b"acu20_bal_";
+            const ALW: &'static [u8] = b"acu20_alw_";
+            const SUP: &'static [u8] = b"acu20_sup_";
+
+            /// Create a token facade with fixed metadata.
+            pub const fn new(name: &'static str, symbol: &'static str, decimals: u8) -> Self {
+                Self { token_name: name, token_symbol: symbol, token_decimals: decimals }
+            }
+
+            fn balances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::BAL) }
+            fn allowances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::ALW) }
+            fn supply(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::SUP) }
+
+            /// Mint `amount` to `to`, increasing total supply. Call from `#[init]`
+            /// or an owner-gated `#[call]`.
+            pub fn mint(&self, to: &Address, amount: &U256) -> Result<(), Error> {
+                let bal = self.balance_of(to);
+                let new_bal = bal.checked_add(amount).ok_or(Error::Overflow)?;
+                self.balances().set_encoded(to.as_bytes(), &new_bal)?;
+                let sup = self.total_supply();
+                let new_sup = sup.checked_add(amount).ok_or(Error::Overflow)?;
+                self.supply().set_encoded(b"total", &new_sup)?;
+                Ok(())
+            }
+
+            fn alw_key(owner: &Address, spender: &Address, buf: &mut [u8; 200]) -> usize {
+                let o = owner.as_bytes();
+                let s = spender.as_bytes();
+                let mut n = 0usize;
+                buf[n..n + o.len()].copy_from_slice(o);
+                n += o.len();
+                buf[n] = 0;
+                n += 1;
+                buf[n..n + s.len()].copy_from_slice(s);
+                n + s.len()
+            }
+
+            fn move_tokens(&self, from: &Address, to: &Address, amount: &U256) -> Result<(), Error> {
+                let from_bal = self.balance_of(from);
+                let new_from = from_bal.checked_sub(amount).ok_or(Error::InsufficientBalance)?;
+                let to_bal = self.balance_of(to);
+                let new_to = to_bal.checked_add(amount).ok_or(Error::Overflow)?;
+                self.balances().set_encoded(from.as_bytes(), &new_from)?;
+                self.balances().set_encoded(to.as_bytes(), &new_to)?;
+                Ok(())
+            }
+        }
+
+        impl Token for Acu20 {
+            fn name(&self) -> &str { self.token_name }
+            fn symbol(&self) -> &str { self.token_symbol }
+            fn decimals(&self) -> u8 { self.token_decimals }
+
+            fn total_supply(&self) -> U256 {
+                self.supply().get_decoded::<U256>(b"total").unwrap_or(U256::ZERO)
+            }
+            fn balance_of(&self, owner: &Address) -> U256 {
+                self.balances().get_decoded::<U256>(owner.as_bytes()).unwrap_or(U256::ZERO)
+            }
+            fn transfer(&mut self, to: &Address, amount: &U256) -> Result<bool, Error> {
+                let from = env::caller();
+                self.move_tokens(&from, to, amount)?;
+                Ok(true)
+            }
+            fn approve(&mut self, spender: &Address, amount: &U256) -> Result<bool, Error> {
+                let owner = env::caller();
+                let mut key = [0u8; 200];
+                let n = Self::alw_key(&owner, spender, &mut key);
+                self.allowances().set_encoded(&key[..n], amount)?;
+                Ok(true)
+            }
+            fn allowance(&self, owner: &Address, spender: &Address) -> U256 {
+                let mut key = [0u8; 200];
+                let n = Self::alw_key(owner, spender, &mut key);
+                self.allowances().get_decoded::<U256>(&key[..n]).unwrap_or(U256::ZERO)
+            }
+            fn transfer_from(&mut self, from: &Address, to: &Address, amount: &U256) -> Result<bool, Error> {
+                let spender = env::caller();
+                let allowed = self.allowance(from, &spender);
+                let new_allowed = allowed.checked_sub(amount).ok_or(Error::Unauthorized)?;
+                let mut key = [0u8; 200];
+                let n = Self::alw_key(from, &spender, &mut key);
+                self.allowances().set_encoded(&key[..n], &new_allowed)?;
+                self.move_tokens(from, to, amount)?;
+                Ok(true)
+            }
+        }
     }
 
     /// ACU-721 (NFT) function selectors
@@ -2008,6 +2133,123 @@ pub mod tokens {
 
             /// Returns the URI for a token type
             fn uri(&self, token_id: &U256) -> Option<&str>;
+        }
+    }
+}
+
+// =============================================================================
+// Access Control Components (the OpenZeppelin Ownable / AccessControl analogs)
+// =============================================================================
+
+/// Reusable access-control components you compose in your contract.
+pub mod access {
+    use super::*;
+
+    /// Single-owner access control (the `Ownable` analog). Set an owner in your
+    /// `#[init]`, then gate privileged calls with `only_owner()`.
+    pub struct Ownable {
+        slot: &'static [u8],
+    }
+    impl Ownable {
+        /// Namespace this component under a storage slot.
+        pub const fn new(slot: &'static [u8]) -> Self { Self { slot } }
+        /// The standard `ownable_` slot.
+        pub const fn standard() -> Self { Self { slot: b"ownable_" } }
+        fn map(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(self.slot) }
+        /// Set the initial owner (call once, from `#[init]`).
+        pub fn init(&self, owner: &Address) -> Result<(), Error> { self.map().set_encoded(b"owner", owner) }
+        /// The current owner, if set.
+        pub fn owner(&self) -> Option<Address> { self.map().get_decoded::<Address>(b"owner") }
+        /// Ok if the caller is the owner, else `Error::Unauthorized`. Fail-closed:
+        /// if no owner is set, this denies.
+        pub fn only_owner(&self) -> Result<(), Error> {
+            match self.owner() {
+                Some(o) if o == env::caller() => Ok(()),
+                _ => Err(Error::Unauthorized),
+            }
+        }
+        /// Transfer ownership (owner-gated).
+        pub fn transfer_ownership(&self, new_owner: &Address) -> Result<(), Error> {
+            self.only_owner()?;
+            self.map().set_encoded(b"owner", new_owner)
+        }
+    }
+
+    /// Role-based access control (the `AccessControl` analog). Grant/revoke named
+    /// roles to addresses and gate calls with `only_role`.
+    pub struct AccessControl {
+        prefix: &'static [u8],
+    }
+    impl AccessControl {
+        /// Namespace this component under a storage prefix.
+        pub const fn new(prefix: &'static [u8]) -> Self { Self { prefix } }
+        /// The standard `acl_` prefix.
+        pub const fn standard() -> Self { Self { prefix: b"acl_" } }
+        fn map(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(self.prefix) }
+        fn key(role: &[u8], who: &Address, buf: &mut [u8; 200]) -> usize {
+            let a = who.as_bytes();
+            let mut n = 0usize;
+            buf[n..n + role.len()].copy_from_slice(role);
+            n += role.len();
+            buf[n] = 0;
+            n += 1;
+            buf[n..n + a.len()].copy_from_slice(a);
+            n + a.len()
+        }
+        /// True if `who` holds `role`.
+        pub fn has_role(&self, role: &[u8], who: &Address) -> bool {
+            let mut k = [0u8; 200];
+            let n = Self::key(role, who, &mut k);
+            self.map().get_decoded::<bool>(&k[..n]).unwrap_or(false)
+        }
+        /// Grant `role` to `who`.
+        pub fn grant_role(&self, role: &[u8], who: &Address) -> Result<(), Error> {
+            let mut k = [0u8; 200];
+            let n = Self::key(role, who, &mut k);
+            self.map().set_encoded(&k[..n], &true)
+        }
+        /// Revoke `role` from `who`.
+        pub fn revoke_role(&self, role: &[u8], who: &Address) -> Result<(), Error> {
+            let mut k = [0u8; 200];
+            let n = Self::key(role, who, &mut k);
+            self.map().set_encoded(&k[..n], &false)
+        }
+        /// Ok if the caller holds `role`, else `Error::Unauthorized` (fail-closed).
+        pub fn only_role(&self, role: &[u8]) -> Result<(), Error> {
+            if self.has_role(role, &env::caller()) { Ok(()) } else { Err(Error::Unauthorized) }
+        }
+    }
+}
+
+// =============================================================================
+// Security Components (the OpenZeppelin Pausable analog)
+// =============================================================================
+
+/// Reusable security components you compose in your contract.
+pub mod security {
+    use super::*;
+
+    /// A pausable switch (the `Pausable` analog). Gate calls with
+    /// `when_not_paused()`; flip with `pause`/`unpause` (compose with
+    /// `access::Ownable` to make them owner-gated).
+    pub struct Pausable {
+        slot: &'static [u8],
+    }
+    impl Pausable {
+        /// Namespace this component under a storage slot.
+        pub const fn new(slot: &'static [u8]) -> Self { Self { slot } }
+        /// The standard `pausable_` slot.
+        pub const fn standard() -> Self { Self { slot: b"pausable_" } }
+        fn map(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(self.slot) }
+        /// True if currently paused.
+        pub fn is_paused(&self) -> bool { self.map().get_decoded::<bool>(b"paused").unwrap_or(false) }
+        /// Pause (gate this with `Ownable::only_owner`).
+        pub fn pause(&self) -> Result<(), Error> { self.map().set_encoded(b"paused", &true) }
+        /// Unpause.
+        pub fn unpause(&self) -> Result<(), Error> { self.map().set_encoded(b"paused", &false) }
+        /// Ok if not paused, else `Error::InvalidState`.
+        pub fn when_not_paused(&self) -> Result<(), Error> {
+            if self.is_paused() { Err(Error::InvalidState) } else { Ok(()) }
         }
     }
 }

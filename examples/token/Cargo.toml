@@ -1,0 +1,16 @@
+[package]
+name = "token"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A governed ACU-20 token composing the reusable Acu20 + Ownable + Pausable components (DX P6-2)."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+infrix-sdk = { path = "../../infrix-sdk" }
+
+# Standalone example: its own workspace root so it is NOT a member of the parent
+# infrix-crates workspace (which denies warnings and builds for the host target).
+[workspace]
