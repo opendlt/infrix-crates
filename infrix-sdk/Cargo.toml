@@ -3,10 +3,12 @@ name = "infrix-sdk"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "SDK for developing Infrix smart contracts"
-repository = "https://github.com/AccumulateNetwork/infrix"
+description = "The contract-authoring SDK for Infrix — governed, verifiable smart contracts on Accumulate (storage, token standards, access/security components, host bindings, the prelude)."
+repository = "https://github.com/opendlt/infrix-crates"
+homepage = "https://infrix.opendlt.org"
+readme = "README.md"
 keywords = ["accumulate", "smart-contracts", "wasm", "blockchain"]
-categories = ["cryptography", "wasm"]
+categories = ["cryptography::cryptocurrencies", "wasm"]
 
 [lib]
 crate-type = ["rlib"]

@@ -1,0 +1,62 @@
+name: Publish crates to crates.io
+
+# DX O-3: the components are only "install-and-compose" if they are actually
+# installable. This publishes infrix-types → infrix-macros → infrix-sdk (in
+# dependency order) to crates.io on a version tag. It needs a CRATES_IO_TOKEN
+# secret (a crates.io API token) — set it once in the repo settings, then push a
+# tag like `v0.1.0` to release.
+#
+# Until this has run at least once, scaffolds depend on the crate via its git
+# URL (works today, no publish needed); after the first publish, switch scaffold
+# templates to the `version = "…"` form.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Package + verify only, do not publish"
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Verify the crates build (host + wasm32, the contract surface)
+        run: |
+          cargo build --workspace
+          cargo build --workspace --target wasm32-unknown-unknown
+
+      - name: Test the workspace
+        run: cargo test --workspace
+
+      - name: Package (always) — proves each crate is publishable
+        run: |
+          cargo package -p infrix-types
+          cargo package -p infrix-macros
+          cargo package -p infrix-sdk
+
+      - name: Publish in dependency order (types → macros → sdk)
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::error::CRATES_IO_TOKEN secret is not set — add it in repo Settings → Secrets to publish."
+            exit 1
+          fi
+          cargo publish -p infrix-types
+          # crates.io needs a moment to index each crate before its dependents resolve.
+          sleep 30
+          cargo publish -p infrix-macros
+          sleep 30
+          cargo publish -p infrix-sdk

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Procedural macros for Infrix smart contracts"
-repository = "https://github.com/AccumulateNetwork/infrix"
+repository = "https://github.com/opendlt/infrix-crates"
 keywords = ["accumulate", "smart-contracts", "wasm", "blockchain", "macros"]
 categories = ["cryptography", "wasm", "development-tools::procedural-macro-helpers"]
 
