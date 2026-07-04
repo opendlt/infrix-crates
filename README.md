@@ -26,6 +26,8 @@ Don't hand-roll standard logic — **compose** these importable components (DX P
 | Component | Import | What it gives you |
 |-----------|--------|-------------------|
 | **ACU-20 token** | `infrix_sdk::tokens::acu20::Acu20` | A full storage-backed fungible token (balances, allowances, `mint`, checked math). The ERC-20 analog. |
+| **ACU-721 NFT** | `infrix_sdk::tokens::acu721::Acu721` | A full storage-backed non-fungible token — ownership, balances, approvals, operator approvals, `mint`/`mint_next` (auto-increment), and EIP-2981 royalties. The ERC-721 analog. |
+| **ACU-1155 multi-token** | `infrix_sdk::tokens::acu1155::Acu1155` | A storage-backed multi-token — any mix of fungible + non-fungible ids in one contract, per-(owner,id) balances, operator approvals, `mint`. The ERC-1155 analog. |
 | **Ownable** | `infrix_sdk::access::Ownable` | Single-owner access control — `init`, `only_owner()`, `transfer_ownership`. |
 | **AccessControl** | `infrix_sdk::access::AccessControl` | Role-based access — `grant_role`/`revoke_role`/`has_role`/`only_role`. |
 | **Pausable** | `infrix_sdk::security::Pausable` | An emergency pause switch — `pause`/`unpause`/`when_not_paused()`. |

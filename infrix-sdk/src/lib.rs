@@ -2076,6 +2076,185 @@ pub mod tokens {
             /// Returns the token URI for metadata
             fn token_uri(&self, token_id: &U256) -> Option<&str>;
         }
+
+        /// A ready-to-use, storage-backed ACU-721 non-fungible token — the
+        /// OpenZeppelin `ERC721` analog. **Compose it** in your contract: hold an
+        /// `Acu721`, `mint` (or `mint_next`) in an owner-gated `#[call]`, and
+        /// delegate the standard [`NFT`] methods. Ownership, per-owner balances,
+        /// per-token approvals, and operator approvals live in the canonical
+        /// `StorageMap`. It also carries EIP-2981-style default royalties
+        /// (`set_default_royalty` / `royalty_info`) and a gas-friendly
+        /// auto-increment mint (`mint_next`, the ERC721A-style convenience).
+        ///
+        /// ```ignore
+        /// use infrix_sdk::prelude::*;
+        /// use infrix_sdk::tokens::acu721::{Acu721, NFT};
+        ///
+        /// fn nft() -> Acu721 { Acu721::new("MyArt", "ART", "https://meta.example/") }
+        ///
+        /// #[contract] pub struct Collection {}
+        /// #[contract_impl]
+        /// impl Collection {
+        ///     #[call] pub fn mint(&mut self, to: Address) -> Result<U256, Error> { nft().mint_next(&to) }
+        ///     #[view] pub fn owner_of(&self, id: U256) -> Address {
+        ///         nft().owner_of(&id).unwrap_or(Address::empty())
+        ///     }
+        /// }
+        /// ```
+        pub struct Acu721 {
+            collection_name: &'static str,
+            collection_symbol: &'static str,
+            base_uri: &'static str,
+        }
+
+        impl Acu721 {
+            const OWN: &'static [u8] = b"acu721_own_"; // token_id -> owner
+            const BAL: &'static [u8] = b"acu721_bal_"; // owner    -> count
+            const APP: &'static [u8] = b"acu721_app_"; // token_id -> approved
+            const OPR: &'static [u8] = b"acu721_opr_"; // owner|operator -> bool
+            const CNT: &'static [u8] = b"acu721_cnt_"; // next auto-increment id
+            const ROY: &'static [u8] = b"acu721_roy_"; // recv -> Address, frac -> u16
+
+            /// Create an NFT-collection facade with fixed metadata.
+            pub const fn new(
+                name: &'static str,
+                symbol: &'static str,
+                base_uri: &'static str,
+            ) -> Self {
+                Self { collection_name: name, collection_symbol: symbol, base_uri }
+            }
+
+            /// Collection name.
+            pub fn name(&self) -> &str { self.collection_name }
+            /// Collection symbol.
+            pub fn symbol(&self) -> &str { self.collection_symbol }
+
+            fn owners(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::OWN) }
+            fn balances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::BAL) }
+            fn approvals(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::APP) }
+            fn operators(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::OPR) }
+            fn counter(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::CNT) }
+            fn royalties(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::ROY) }
+
+            fn opr_key(owner: &Address, operator: &Address, buf: &mut [u8; 200]) -> usize {
+                let o = owner.as_bytes();
+                let p = operator.as_bytes();
+                let mut n = 0usize;
+                buf[n..n + o.len()].copy_from_slice(o);
+                n += o.len();
+                buf[n] = 0;
+                n += 1;
+                buf[n..n + p.len()].copy_from_slice(p);
+                n + p.len()
+            }
+
+            fn bump_balance(&self, owner: &Address, up: bool) -> Result<(), Error> {
+                let cur = self.balance_of(owner);
+                let next = if up {
+                    cur.checked_add(&U256::ONE).ok_or(Error::Overflow)?
+                } else {
+                    cur.checked_sub(&U256::ONE).ok_or(Error::Underflow)?
+                };
+                self.balances().set_encoded(owner.as_bytes(), &next)
+            }
+
+            /// Mint `token_id` to `to`. Fails if the token already exists. Call
+            /// from an owner-gated `#[call]` (compose with `access::Ownable`).
+            pub fn mint(&self, to: &Address, token_id: &U256) -> Result<(), Error> {
+                if self.owner_of(token_id).is_some() {
+                    return Err(Error::InvalidState);
+                }
+                self.owners().set_encoded(&token_id.to_be_bytes(), to)?;
+                self.bump_balance(to, true)
+            }
+
+            /// Mint the next sequential token id to `to`, returning it — the
+            /// gas-friendly auto-increment mint (the ERC721A-style convenience).
+            pub fn mint_next(&self, to: &Address) -> Result<U256, Error> {
+                let id = self.counter().get_decoded::<U256>(b"next").unwrap_or(U256::ZERO);
+                self.mint(to, &id)?;
+                let next = id.checked_add(&U256::ONE).ok_or(Error::Overflow)?;
+                self.counter().set_encoded(b"next", &next)?;
+                Ok(id)
+            }
+
+            /// Set the collection-wide EIP-2981 royalty: `fee_bps` basis points
+            /// (e.g. 250 = 2.5%) paid to `receiver`.
+            pub fn set_default_royalty(&self, receiver: &Address, fee_bps: u16) -> Result<(), Error> {
+                self.royalties().set_encoded(b"recv", receiver)?;
+                self.royalties().set_encoded(b"frac", &fee_bps)
+            }
+
+            /// EIP-2981: the royalty (receiver, amount) owed on a `sale_price`.
+            pub fn royalty_info(&self, _token_id: &U256, sale_price: &U256) -> (Address, U256) {
+                let receiver = self.royalties().get_decoded::<Address>(b"recv").unwrap_or(Address::empty());
+                let bps = self.royalties().get_decoded::<u16>(b"frac").unwrap_or(0);
+                let amount = sale_price
+                    .checked_mul(&U256::from(bps as u64))
+                    .and_then(|v| v.checked_div(&U256::from(10000u64)))
+                    .unwrap_or(U256::ZERO);
+                (receiver, amount)
+            }
+
+            fn approved_or_owner(&self, spender: &Address, token_id: &U256) -> bool {
+                match self.owner_of(token_id) {
+                    None => false,
+                    Some(owner) => {
+                        &owner == spender
+                            || self.get_approved(token_id).as_ref() == Some(spender)
+                            || self.is_approved_for_all(&owner, spender)
+                    }
+                }
+            }
+        }
+
+        impl NFT for Acu721 {
+            fn owner_of(&self, token_id: &U256) -> Option<Address> {
+                self.owners().get_decoded::<Address>(&token_id.to_be_bytes())
+            }
+            fn balance_of(&self, owner: &Address) -> U256 {
+                self.balances().get_decoded::<U256>(owner.as_bytes()).unwrap_or(U256::ZERO)
+            }
+            fn approve(&mut self, to: &Address, token_id: &U256) -> Result<(), Error> {
+                let owner = self.owner_of(token_id).ok_or(Error::InvalidState)?;
+                let caller = env::caller();
+                if owner != caller && !self.is_approved_for_all(&owner, &caller) {
+                    return Err(Error::Unauthorized);
+                }
+                self.approvals().set_encoded(&token_id.to_be_bytes(), to)
+            }
+            fn get_approved(&self, token_id: &U256) -> Option<Address> {
+                self.approvals().get_decoded::<Address>(&token_id.to_be_bytes())
+            }
+            fn set_approval_for_all(&mut self, operator: &Address, approved: bool) -> Result<(), Error> {
+                let owner = env::caller();
+                let mut key = [0u8; 200];
+                let n = Self::opr_key(&owner, operator, &mut key);
+                self.operators().set_encoded(&key[..n], &approved)
+            }
+            fn is_approved_for_all(&self, owner: &Address, operator: &Address) -> bool {
+                let mut key = [0u8; 200];
+                let n = Self::opr_key(owner, operator, &mut key);
+                self.operators().get_decoded::<bool>(&key[..n]).unwrap_or(false)
+            }
+            fn transfer_from(&mut self, from: &Address, to: &Address, token_id: &U256) -> Result<(), Error> {
+                let owner = self.owner_of(token_id).ok_or(Error::InvalidState)?;
+                if &owner != from {
+                    return Err(Error::InvalidArgument);
+                }
+                let caller = env::caller();
+                if !self.approved_or_owner(&caller, token_id) {
+                    return Err(Error::Unauthorized);
+                }
+                self.approvals().delete(&token_id.to_be_bytes());
+                self.owners().set_encoded(&token_id.to_be_bytes(), to)?;
+                self.bump_balance(from, false)?;
+                self.bump_balance(to, true)
+            }
+            fn token_uri(&self, _token_id: &U256) -> Option<&str> {
+                if self.base_uri.is_empty() { None } else { Some(self.base_uri) }
+            }
+        }
     }
 
     /// ACU-1155 (Multi-Token) function selectors
@@ -2133,6 +2312,112 @@ pub mod tokens {
 
             /// Returns the URI for a token type
             fn uri(&self, token_id: &U256) -> Option<&str>;
+        }
+
+        /// A ready-to-use, storage-backed ACU-1155 multi-token — the OpenZeppelin
+        /// `ERC1155` analog. One contract holds any mix of fungible and
+        /// non-fungible token ids. **Compose it**: hold an `Acu1155`,
+        /// `mint(to, id, amount)` in an owner-gated `#[call]`, and delegate the
+        /// standard [`MultiToken`] methods. Per-(owner, id) balances and operator
+        /// approvals live in the canonical `StorageMap`.
+        ///
+        /// ```ignore
+        /// use infrix_sdk::prelude::*;
+        /// use infrix_sdk::tokens::acu1155::{Acu1155, MultiToken};
+        /// fn items() -> Acu1155 { Acu1155::new("https://meta.example/{id}") }
+        /// ```
+        pub struct Acu1155 {
+            base_uri: &'static str,
+        }
+
+        impl Acu1155 {
+            const BAL: &'static [u8] = b"acu1155_bal_"; // owner|token_id -> amount
+            const OPR: &'static [u8] = b"acu1155_opr_"; // owner|operator -> bool
+
+            /// Create a multi-token facade with a fixed base URI.
+            pub const fn new(base_uri: &'static str) -> Self {
+                Self { base_uri }
+            }
+
+            fn balances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::BAL) }
+            fn operators(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::OPR) }
+
+            fn bal_key(owner: &Address, token_id: &U256, buf: &mut [u8; 200]) -> usize {
+                let o = owner.as_bytes();
+                let id = token_id.to_be_bytes();
+                let mut n = 0usize;
+                buf[n..n + o.len()].copy_from_slice(o);
+                n += o.len();
+                buf[n] = 0;
+                n += 1;
+                buf[n..n + 32].copy_from_slice(&id);
+                n + 32
+            }
+            fn opr_key(owner: &Address, operator: &Address, buf: &mut [u8; 200]) -> usize {
+                let o = owner.as_bytes();
+                let p = operator.as_bytes();
+                let mut n = 0usize;
+                buf[n..n + o.len()].copy_from_slice(o);
+                n += o.len();
+                buf[n] = 0;
+                n += 1;
+                buf[n..n + p.len()].copy_from_slice(p);
+                n + p.len()
+            }
+
+            /// Mint `amount` of `token_id` to `to`. Call from an owner-gated `#[call]`.
+            pub fn mint(&self, to: &Address, token_id: &U256, amount: &U256) -> Result<(), Error> {
+                let cur = self.balance_of(to, token_id);
+                let next = cur.checked_add(amount).ok_or(Error::Overflow)?;
+                let mut key = [0u8; 200];
+                let n = Self::bal_key(to, token_id, &mut key);
+                self.balances().set_encoded(&key[..n], &next)
+            }
+        }
+
+        impl MultiToken for Acu1155 {
+            fn balance_of(&self, owner: &Address, token_id: &U256) -> U256 {
+                let mut key = [0u8; 200];
+                let n = Self::bal_key(owner, token_id, &mut key);
+                self.balances().get_decoded::<U256>(&key[..n]).unwrap_or(U256::ZERO)
+            }
+            fn set_approval_for_all(&mut self, operator: &Address, approved: bool) -> Result<(), Error> {
+                let owner = env::caller();
+                let mut key = [0u8; 200];
+                let n = Self::opr_key(&owner, operator, &mut key);
+                self.operators().set_encoded(&key[..n], &approved)
+            }
+            fn is_approved_for_all(&self, owner: &Address, operator: &Address) -> bool {
+                let mut key = [0u8; 200];
+                let n = Self::opr_key(owner, operator, &mut key);
+                self.operators().get_decoded::<bool>(&key[..n]).unwrap_or(false)
+            }
+            fn safe_transfer_from(
+                &mut self,
+                from: &Address,
+                to: &Address,
+                token_id: &U256,
+                amount: &U256,
+                _data: &[u8],
+            ) -> Result<(), Error> {
+                let caller = env::caller();
+                if &caller != from && !self.is_approved_for_all(from, &caller) {
+                    return Err(Error::Unauthorized);
+                }
+                let from_bal = self.balance_of(from, token_id);
+                let new_from = from_bal.checked_sub(amount).ok_or(Error::InsufficientBalance)?;
+                let to_bal = self.balance_of(to, token_id);
+                let new_to = to_bal.checked_add(amount).ok_or(Error::Overflow)?;
+                let mut fk = [0u8; 200];
+                let flen = Self::bal_key(from, token_id, &mut fk);
+                self.balances().set_encoded(&fk[..flen], &new_from)?;
+                let mut tk = [0u8; 200];
+                let tlen = Self::bal_key(to, token_id, &mut tk);
+                self.balances().set_encoded(&tk[..tlen], &new_to)
+            }
+            fn uri(&self, _token_id: &U256) -> Option<&str> {
+                if self.base_uri.is_empty() { None } else { Some(self.base_uri) }
+            }
         }
     }
 }
