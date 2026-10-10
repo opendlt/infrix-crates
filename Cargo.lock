@@ -277,6 +277,7 @@ dependencies = [
 name = "infrix-macros"
 version = "0.1.0"
 dependencies = [
+ "infrix-sdk",
  "infrix-types",
  "proc-macro2",
  "quote",
@@ -296,13 +297,18 @@ dependencies = [
  "k256",
  "rand_core",
  "ripemd",
+ "serde_json",
  "sha2",
  "sha3",
+ "trybuild",
 ]
 
 [[package]]
 name = "infrix-types"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "itoa"

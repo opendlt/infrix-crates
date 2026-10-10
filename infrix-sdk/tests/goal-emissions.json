@@ -1,0 +1,15 @@
+{
+  "emissions": [
+    {
+      "goal": {
+        "customParams": {
+          "contract": "acc://alice.acme/ledger",
+          "function": "settle_up"
+        },
+        "type": "CONTRACT_CALL"
+      },
+      "helper": "#[governed]",
+      "sdk": "rust"
+    }
+  ]
+}

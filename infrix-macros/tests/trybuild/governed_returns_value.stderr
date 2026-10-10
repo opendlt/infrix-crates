@@ -1,0 +1,7 @@
+error: #[governed] requires a Result<(), E> return type because submitting a child intent has no synchronous contract return value
+ --> tests/trybuild/governed_returns_value.rs:1:1
+  |
+1 | #[infrix_sdk::governed]
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `infrix_sdk::governed` (in Nightly builds, run with -Z macro-backtrace for more info)

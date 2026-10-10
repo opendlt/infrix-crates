@@ -18,3 +18,7 @@ alloc = []
 
 [dependencies]
 # No external dependencies for no_std compatibility
+
+[dev-dependencies]
+# Reads the vendored goal-vocabulary.json (tests/goal_vocabulary.rs).
+serde_json = "1"

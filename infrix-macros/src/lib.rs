@@ -61,8 +61,8 @@ use syn::{
     parse_macro_input,
     punctuated::Punctuated,
     spanned::Spanned,
-    Attribute, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct, Lit,
-    LitInt, LitStr, Meta, Pat, ReturnType, Token, Type,
+    Attribute, Expr, FnArg, Ident, ImplItem, ImplItemFn, ItemFn, ItemImpl, ItemStruct, Lit, LitInt,
+    LitStr, Meta, Pat, ReturnType, Token, Type,
 };
 
 mod governance_macros;
@@ -706,10 +706,8 @@ fn generate_event(input: ItemStruct) -> syn::Result<TokenStream2> {
     event_schema_line.push('\n');
     let event_schema_bytes = event_schema_line.as_bytes();
     let event_schema_len = event_schema_bytes.len();
-    let event_section_static = format_ident!(
-        "__INFRIX_EVENT_SCHEMA_{}",
-        struct_name_str.to_uppercase()
-    );
+    let event_section_static =
+        format_ident!("__INFRIX_EVENT_SCHEMA_{}", struct_name_str.to_uppercase());
 
     // Generate topic encoding
     let topic_count = indexed_fields.len() + 1; // +1 for event signature
@@ -1131,8 +1129,30 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
                     }
                     result.data_len as i32
                 }
-                Err(e) => -(e as i32)
+                // The ABI's failure convention lives in one place:
+                // infrix_types::Error::result_code. Do not inline the negation
+                // here — a second copy is how a wire contract drifts.
+                Err(e) => e.result_code()
             }
+        }
+
+        /// The dispatch ABI's guest allocator.
+        ///
+        /// The host places a call's input and output buffers inside this
+        /// contract's own linear memory and allocates through these exports
+        /// rather than choosing an address, which would collide with whatever
+        /// the contract put there. Without them the platform refuses the call
+        /// at "allocator export '__alloc' not found" — which it did for every
+        /// SDK-built contract until 2026-09-05.
+        #[no_mangle]
+        pub extern "C" fn __alloc(size: i32) -> i32 {
+            ::infrix_sdk::abi_alloc(size)
+        }
+
+        /// Releases a block `__alloc` returned.
+        #[no_mangle]
+        pub extern "C" fn __free(ptr: i32) {
+            ::infrix_sdk::abi_free(ptr)
         }
 
         /// WASM entry point - get contract ABI
@@ -1176,6 +1196,54 @@ fn generate_contract_impl(input: ItemImpl) -> syn::Result<TokenStream2> {
 
 // Helper functions
 
+/// Explains why a parameter type cannot cross the dispatch ABI, or `None` when
+/// it can.
+///
+/// # Why this exists
+///
+/// The wrapper decodes each parameter with `Decode::decode_with_len`, so a type
+/// with no codec stopped the build at `the trait bound X: Decode is not
+/// satisfied` — pointing at generated code, naming a trait the author never
+/// wrote, and saying nothing about what to do instead. Every message below says
+/// what the ABI carries and what to write.
+///
+/// The list is deliberately CLOSED. A type that is merely unimplemented gets a
+/// message saying so; the floats get one saying they never will.
+///
+/// Matrix row A.ABI.CODEC.DECLAREDTYPES.
+fn unsupported_param_reason(ty: &Type) -> Option<String> {
+    let s = quote!(#ty).to_string().replace(' ', "");
+    let msg = match s.as_str() {
+        // Floating point is REFUSED ON PURPOSE and not for want of effort.
+        // A governed execution is replayed, ghost-simulated and gas-metered,
+        // and every node must reach a bit-identical result; NaN payloads and
+        // canonicalisation are not pinned tightly enough across WASM engines
+        // for a float to be safe in a consensus-visible value. The shapes
+        // subsystem already refuses f64 by name for the same reason.
+        "f32" | "f64" => format!(
+            "the Infrix ABI does not carry `{s}`, and will not: a governed call is replayed and compared across nodes, and floating point is not reproducible enough to be a consensus-visible value. Use an integer with a fixed scale (for example hundredths as i64), or U256"
+        ),
+        // Borrowed forms cannot own what they decode.
+        "&str" => "a decoded parameter must own its bytes; declare `String` instead of `&str`"
+            .to_string(),
+        "&[u8]" => "a decoded parameter must own its bytes; declare `Vec<u8>` instead of `&[u8]`"
+            .to_string(),
+        _ if s.starts_with("Option<") => format!(
+            "the Infrix ABI has no wire form for `{s}`. Optionality is not encoded: declare the value directly, or use a sentinel the contract documents"
+        ),
+        // Vec<u8> IS carried; any other Vec is not.
+        _ if s.starts_with("Vec<") && s != "Vec<u8>" => format!(
+            "the Infrix ABI has no wire form for `{s}`. `Vec<u8>` is carried as a length-prefixed byte string; a sequence of anything else is not encoded"
+        ),
+        _ => return None,
+    };
+    Some(format!(
+        "{msg}.
+
+The ABI carries: u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, bool, U256, Hash ([u8; 32]), [u8; 20], Address, Recipient, String and Vec<u8>."
+    ))
+}
+
 fn extract_params(inputs: &Punctuated<FnArg, Token![,]>) -> syn::Result<Vec<(Ident, Type)>> {
     let mut params = Vec::new();
 
@@ -1183,6 +1251,9 @@ fn extract_params(inputs: &Punctuated<FnArg, Token![,]>) -> syn::Result<Vec<(Ide
         match arg {
             FnArg::Receiver(_) => continue, // Skip self
             FnArg::Typed(pat_type) => {
+                if let Some(why) = unsupported_param_reason(&pat_type.ty) {
+                    return Err(syn::Error::new(pat_type.ty.span(), why));
+                }
                 if let Pat::Ident(pat_ident) = &*pat_type.pat {
                     params.push((pat_ident.ident.clone(), (*pat_type.ty).clone()));
                 } else {
@@ -1209,6 +1280,22 @@ fn generate_param_decodes(params: &[(Ident, Type)]) -> syn::Result<TokenStream2>
     Ok(quote! { #(#decodes)* })
 }
 
+/// The routing role a parameter's TYPE declares, or "" for none.
+///
+/// Declaring the role by type is what makes it impossible to attach "recipient"
+/// to something that is not an account, and what keeps the declaration in the
+/// contract's signature rather than in an attribute that can drift out of step
+/// with the parameter list.
+///
+/// Matrix row A.DEFI.TRANSFERHOP.RECIPIENT.
+fn rust_type_to_role(ty: &Type) -> &'static str {
+    let s = quote!(#ty).to_string().replace(' ', "");
+    match s.as_str() {
+        "Recipient" | "::infrix_sdk::infrix_types::Recipient" => "recipient",
+        _ => "",
+    }
+}
+
 fn calculate_selector(name: &str) -> u32 {
     // Simple hash function for selector calculation
     // In production, this would use keccak256
@@ -1227,16 +1314,23 @@ fn calculate_selector(name: &str) -> u32 {
 fn rust_type_to_schema(ty: &Type) -> String {
     let s = quote!(#ty).to_string().replace(' ', "");
     match s.as_str() {
+        "i8" => "i8".into(),
+        "i16" => "i16".into(),
         "i32" => "i32".into(),
         "i64" => "i64".into(),
+        "i128" => "i128".into(),
+        "u8" => "u8".into(),
+        "u16" => "u16".into(),
         "u32" => "u32".into(),
         "u64" => "u64".into(),
-        "f32" => "f32".into(),
-        "f64" => "f64".into(),
         "bool" => "bool".into(),
         "String" | "&str" => "string".into(),
         "Vec<u8>" | "&[u8]" => "bytes".into(),
         "Address" | "::infrix_sdk::infrix_types::Address" => "address".into(),
+        // A Recipient IS an Address on the wire; the distinction is carried in
+        // the schema's `role`, not in the type string, so a caller that does not
+        // know about roles still encodes the right bytes.
+        "Recipient" | "::infrix_sdk::infrix_types::Recipient" => "address".into(),
         "U256" | "::infrix_sdk::infrix_types::U256" => "u256".into(),
         "Hash" | "::infrix_sdk::infrix_types::Hash" | "[u8;32]" => "bytes32".into(),
         "[u8;20]" => "bytes20".into(),
@@ -1320,11 +1414,11 @@ fn build_schema_json(
     functions: &[(
         String,
         String,
-        Vec<(String, String)>,
+        Vec<(String, String, String)>,
         Vec<(String, String)>,
         String,
     )],
-    // (name, mutability, params[(name,type)], returns[(name,type)], doc)
+    // (name, mutability, params[(name,type,role)], returns[(name,type)], doc)
     events: &[(String, Vec<(String, String, bool)>)],
     // (name, fields[(name, type, indexed)])
 ) -> String {
@@ -1346,15 +1440,21 @@ fn build_schema_json(
         ));
 
         json.push_str("      \"params\": [");
-        for (j, (pname, ptype)) in params.iter().enumerate() {
+        for (j, (pname, ptype, prole)) in params.iter().enumerate() {
             if j > 0 {
                 json.push_str(", ");
             }
             json.push_str(&format!(
-                "{{\"name\":\"{}\",\"type\":\"{}\"}}",
+                "{{\"name\":\"{}\",\"type\":\"{}\"",
                 escape_json(pname),
                 escape_json(ptype)
             ));
+            // Omitted when empty so a contract that declares no roles emits
+            // exactly the schema it emitted before.
+            if !prole.is_empty() {
+                json.push_str(&format!(",\"role\":\"{}\"", escape_json(prole)));
+            }
+            json.push('}');
         }
         json.push_str("],\n");
 
@@ -1419,7 +1519,10 @@ fn build_schema_json(
 /// directly into the contract ABI's events list.
 fn build_event_schema_json(name: &str, fields: &[(String, String, bool)]) -> String {
     let mut json = String::new();
-    json.push_str(&format!("{{\"name\":\"{}\",\"fields\":[", escape_json(name)));
+    json.push_str(&format!(
+        "{{\"name\":\"{}\",\"fields\":[",
+        escape_json(name)
+    ));
     for (i, (fname, ftype, indexed)) in fields.iter().enumerate() {
         if i > 0 {
             json.push(',');
@@ -1471,9 +1574,15 @@ fn generate_schema_section(self_ty: &Type, input: &ItemImpl) -> TokenStream2 {
 
             if let Some(mut_str) = mutability {
                 let params_raw = extract_params(&method.sig.inputs).unwrap_or_default();
-                let params: Vec<(String, String)> = params_raw
+                let params: Vec<(String, String, String)> = params_raw
                     .iter()
-                    .map(|(name, ty)| (name.to_string(), rust_type_to_schema(ty)))
+                    .map(|(name, ty)| {
+                        (
+                            name.to_string(),
+                            rust_type_to_schema(ty),
+                            rust_type_to_role(ty).to_string(),
+                        )
+                    })
                     .collect();
 
                 let returns = extract_return_schema(&method.sig.output);
@@ -1497,12 +1606,39 @@ fn generate_schema_section(self_ty: &Type, input: &ItemImpl) -> TokenStream2 {
     let schema_bytes = schema_json.as_bytes();
     let schema_len = schema_bytes.len();
 
+    // THE CAPABILITY MANIFEST.
+    //
+    // A contract that publishes no `infrix:manifest` section runs under the
+    // platform's implicit (least-privilege) capability set, and its storage
+    // writes are then refused SILENTLY. Measured 2026-09-05 on an SDK-built
+    // contract: `#[init]` ran, `ContractInstance::save` was refused without
+    // error, and every subsequent call answered ContractNotInitialized (-23)
+    // because `load` found nothing.
+    //
+    // The declaration below is not a guess about what the AUTHOR's code needs.
+    // It is what THIS MACRO's own generated code needs: `#[contract]` emits
+    // ContractInstance::load / save / delete, and those are storage reads,
+    // writes and deletes. A contract that reaches further — token transfers,
+    // L0 writes, external calls — still has to declare that itself, and the
+    // platform will refuse what is not declared.
+    let manifest_json = format!(
+        "{{\"schema_version\":1,\"contract_name\":\"{}\",\"required_capabilities\":[\"storage:read\",\"storage:write\",\"storage:delete\"]}}",
+        escape_json(&contract_name)
+    );
+    let manifest_bytes = manifest_json.as_bytes();
+    let manifest_len = manifest_bytes.len();
+
     // Generate a static that embeds the schema in a WASM custom section.
     quote! {
         #[cfg(target_arch = "wasm32")]
         #[link_section = "infrix:schema"]
         #[used]
         static __INFRIX_SCHEMA: [u8; #schema_len] = [#(#schema_bytes),*];
+
+        #[cfg(target_arch = "wasm32")]
+        #[link_section = "infrix:manifest"]
+        #[used]
+        static __INFRIX_MANIFEST: [u8; #manifest_len] = [#(#manifest_bytes),*];
 
         /// Returns the embedded contract schema as a JSON string.
         impl #self_ty {
@@ -1564,7 +1700,7 @@ mod tests {
             (
                 "set".into(),
                 "mutable".into(),
-                vec![("value".into(), "i32".into())],
+                vec![("value".into(), "i32".into(), String::new())],
                 vec![],
                 String::new(),
             ),
@@ -1625,7 +1761,10 @@ mod tests {
              {\"name\":\"to\",\"type\":\"address\",\"indexed\":true},\
              {\"name\":\"amount\",\"type\":\"u256\",\"indexed\":false}]}"
         );
-        assert!(!json.contains('\n'), "must be single-line for NDJSON merging");
+        assert!(
+            !json.contains('\n'),
+            "must be single-line for NDJSON merging"
+        );
     }
 
     // MARKER-AUDIT 2026-06-10 closure: the declared StorageMap<K, V>
@@ -1921,7 +2060,7 @@ pub fn require_approval(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// # Example
 /// ```ignore
 /// #[governed]
-/// pub fn large_transfer(&mut self, to: Address, amount: U256) -> Result<(), Error> {
+/// pub fn settle(&mut self) -> Result<(), Error> {
 ///     // body becomes the execution target of an intent
 ///     Ok(())
 /// }
@@ -1981,5 +2120,233 @@ impl Parse for ApprovalArgs {
         }
 
         Ok(ApprovalArgs { threshold, role })
+    }
+}
+
+#[cfg(test)]
+mod recipient_role_tests {
+    use super::*;
+    use syn::parse_quote;
+
+    // Matrix row A.DEFI.TRANSFERHOP.RECIPIENT.
+    //
+    // A Recipient must be an Address ON THE WIRE and a recipient IN THE SCHEMA.
+    // If the type string ever stopped being "address", a caller that does not
+    // know about roles would encode different bytes and the callee would decode
+    // garbage; if the role stopped being emitted, the router would be unable to
+    // tell which parameter is the destination and a token would go back to
+    // being unroutable.
+    #[test]
+    fn test_recipient_is_an_address_on_the_wire_and_a_recipient_in_the_schema() {
+        let ty: Type = parse_quote!(Recipient);
+        assert_eq!(
+            rust_type_to_schema(&ty),
+            "address",
+            "a Recipient must encode exactly as an Address; a distinct type string would make \
+             every caller that does not know about roles emit different bytes"
+        );
+        assert_eq!(rust_type_to_role(&ty), "recipient");
+
+        let qualified: Type = parse_quote!(::infrix_sdk::infrix_types::Recipient);
+        assert_eq!(rust_type_to_schema(&qualified), "address");
+        assert_eq!(rust_type_to_role(&qualified), "recipient");
+    }
+
+    #[test]
+    fn test_a_plain_address_declares_no_role() {
+        let ty: Type = parse_quote!(Address);
+        assert_eq!(rust_type_to_schema(&ty), "address");
+        assert_eq!(
+            rust_type_to_role(&ty),
+            "",
+            "a plain Address must NOT be read as a recipient: transfer_from(from, to, amount) \
+             has two of them and only one is the destination"
+        );
+        let other: Type = parse_quote!(u64);
+        assert_eq!(rust_type_to_role(&other), "");
+    }
+
+    // The schema section is what the platform reads, so the role has to survive
+    // into the JSON — and a contract that declares no roles must emit exactly
+    // what it emitted before this existed.
+    #[test]
+    fn test_the_schema_section_carries_the_role() {
+        let functions = vec![(
+            "transfer".to_string(),
+            "mutable".to_string(),
+            vec![
+                (
+                    "to".to_string(),
+                    "address".to_string(),
+                    "recipient".to_string(),
+                ),
+                ("amount".to_string(), "u64".to_string(), String::new()),
+            ],
+            vec![("balance".to_string(), "u64".to_string())],
+            String::new(),
+        )];
+        let json = build_schema_json("Token", &functions, &[]);
+        assert!(
+            json.contains(r#"{"name":"to","type":"address","role":"recipient"}"#),
+            "the recipient role did not reach the infrix:schema section: {}",
+            json
+        );
+        assert!(
+            json.contains(r#"{"name":"amount","type":"u64"}"#),
+            "a parameter with no role must emit no role key: {}",
+            json
+        );
+    }
+}
+
+#[cfg(test)]
+mod declared_type_tests {
+    use super::*;
+    use syn::parse_quote;
+
+    // Matrix row A.ABI.CODEC.DECLAREDTYPES.
+    //
+    // Before 2026-09-05 a contract declaring a type the codec did not implement
+    // did not fail to CALL — it failed to BUILD, at "the trait bound X: Decode
+    // is not satisfied", pointing at generated code and naming a trait the
+    // author never wrote. Measured on a probe contract: `#[call] fn
+    // set_label(&mut self, label: String)` stopped exactly there.
+
+    #[test]
+    fn test_every_carryable_type_is_accepted() {
+        for ty in [
+            parse_quote!(u8),
+            parse_quote!(u16),
+            parse_quote!(u32),
+            parse_quote!(u64),
+            parse_quote!(u128),
+            parse_quote!(i8),
+            parse_quote!(i16),
+            parse_quote!(i32),
+            parse_quote!(i64),
+            parse_quote!(i128),
+            parse_quote!(bool),
+            parse_quote!(U256),
+            parse_quote!(Hash),
+            parse_quote!([u8; 32]),
+            parse_quote!([u8; 20]),
+            parse_quote!(Address),
+            parse_quote!(Recipient),
+            parse_quote!(String),
+            parse_quote!(Vec<u8>),
+        ] {
+            let ty: Type = ty;
+            assert!(
+                unsupported_param_reason(&ty).is_none(),
+                "{} was refused, but infrix_types implements a codec for it",
+                quote!(#ty)
+            );
+        }
+    }
+
+    /// Floating point is refused ON PURPOSE, and the message has to say so —
+    /// an author who reads "not implemented" will file a request, and an author
+    /// who reads why will change the design.
+    #[test]
+    fn test_floating_point_is_refused_as_a_decision_not_a_gap() {
+        for ty in [parse_quote!(f32), parse_quote!(f64)] {
+            let ty: Type = ty;
+            let why = unsupported_param_reason(&ty).expect("a float must be refused");
+            assert!(
+                why.contains("will not"),
+                "the message reads like a gap rather than a decision: {why}"
+            );
+            assert!(
+                why.contains("replayed") && why.contains("consensus-visible"),
+                "the message does not say WHY floats are excluded: {why}"
+            );
+            assert!(
+                why.contains("i64") || why.contains("U256"),
+                "the message does not say what to write instead: {why}"
+            );
+        }
+    }
+
+    /// Every refusal names what the ABI does carry, because the author's next
+    /// question is always "then what do I write".
+    #[test]
+    fn test_every_refusal_lists_the_carryable_set() {
+        for ty in [
+            parse_quote!(f64),
+            parse_quote!(&str),
+            parse_quote!(&[u8]),
+            parse_quote!(Option<u64>),
+            parse_quote!(Vec<u64>),
+        ] {
+            let ty: Type = ty;
+            let why = unsupported_param_reason(&ty).expect("must be refused");
+            assert!(
+                why.contains("The ABI carries:"),
+                "{} is refused without saying what IS carried: {why}",
+                quote!(#ty)
+            );
+        }
+    }
+
+    /// The borrowed forms point at the owned type rather than at a trait bound,
+    /// and `Vec<u8>` is NOT swept up with the other sequences.
+    #[test]
+    fn test_borrowed_and_container_refusals_name_the_fix() {
+        let s: Type = parse_quote!(&str);
+        assert!(unsupported_param_reason(&s).unwrap().contains("String"));
+        let b: Type = parse_quote!(&[u8]);
+        assert!(unsupported_param_reason(&b).unwrap().contains("Vec<u8>"));
+        let v: Type = parse_quote!(Vec<u64>);
+        let why = unsupported_param_reason(&v).unwrap();
+        assert!(
+            why.contains("Vec<u8>"),
+            "the message does not name the sequence that IS carried: {why}"
+        );
+        let ok: Type = parse_quote!(Vec<u8>);
+        assert!(
+            unsupported_param_reason(&ok).is_none(),
+            "Vec<u8> was swept up with the sequences it is the exception to"
+        );
+    }
+
+    /// The refusal has to be WIRED, not merely available: extract_params is
+    /// what every entry point goes through.
+    #[test]
+    fn test_extract_params_refuses_and_does_not_merely_warn() {
+        let inputs: Punctuated<FnArg, Token![,]> = parse_quote!(&mut self, rate: f64);
+        let err = extract_params(&inputs).expect_err("a float parameter was accepted");
+        assert!(err.to_string().contains("does not carry"));
+
+        let ok: Punctuated<FnArg, Token![,]> = parse_quote!(&mut self, label: String, n: i64);
+        let params = extract_params(&ok).expect("String and i64 are carryable");
+        assert_eq!(params.len(), 2);
+    }
+
+    /// The schema mapper must not advertise a type the codec cannot carry:
+    /// emitting "f64" is what let the declaration reach a caller that then had
+    /// to refuse it by name at the far end.
+    #[test]
+    fn test_the_schema_mapper_matches_the_carryable_set() {
+        for (ty, want) in [
+            (parse_quote!(i8), "i8"),
+            (parse_quote!(i16), "i16"),
+            (parse_quote!(i32), "i32"),
+            (parse_quote!(i64), "i64"),
+            (parse_quote!(i128), "i128"),
+            (parse_quote!(u8), "u8"),
+            (parse_quote!(u16), "u16"),
+            (parse_quote!(String), "string"),
+            (parse_quote!(Vec<u8>), "bytes"),
+            (parse_quote!([u8; 20]), "bytes20"),
+            (parse_quote!([u8; 32]), "bytes32"),
+        ] {
+            let ty: Type = ty;
+            assert_eq!(rust_type_to_schema(&ty), want, "{}", quote!(#ty));
+        }
+        // f32/f64 no longer have a schema spelling at all; they fall through to
+        // the raw type name, and the refusal above stops them before that
+        // matters.
+        let f: Type = parse_quote!(f64);
+        assert!(unsupported_param_reason(&f).is_some());
     }
 }
