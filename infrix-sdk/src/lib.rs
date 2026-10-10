@@ -1,6 +1,7 @@
 //! Infrix Smart Contract SDK
 //!
 //! Policy-governed execution and evidence layer for Accumulate.
+
 //!
 //! This SDK provides all the tools needed to develop smart contracts for the Infrix platform.
 //! Contracts execute as subordinate plugins within the governance pipeline:
@@ -48,6 +49,11 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// Attribute macros refer to the public `infrix_sdk` path. Giving this crate
+// that alias keeps those expansions valid when a contract is defined in the
+// SDK's own test crate as well as in downstream contracts.
+extern crate self as infrix_sdk;
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
@@ -64,12 +70,80 @@ use alloc::{
 
 // Re-export infrix_types at crate root so proc macro generated code
 // (which references `infrix_types::X`) can resolve through `use infrix_sdk::prelude::*`.
+/// The dispatch ABI's guest allocator.
+///
+/// # Why a contract must export this
+///
+/// The host places a call's INPUT and OUTPUT buffers inside the contract's own
+/// linear memory before invoking `__infrix_call`, and it must not choose the
+/// address itself: a fixed offset collides with whatever the contract put
+/// there. So the ABI requires two exports — `__alloc(size) -> ptr` and
+/// `__free(ptr)` — and the host allocates through them.
+///
+/// The published SDK did not emit them. Measured 2026-09-05: a contract built
+/// with `#[infrix::contract]` and dispatched by the platform failed at
+/// `allocator export '__alloc' not found`, which means NO SDK-BUILT RUST
+/// CONTRACT WAS DISPATCHABLE. It went unnoticed because the platform's own
+/// conformance fixtures are hand-written WASM that export their own allocator.
+///
+/// `abi_alloc` stores the block's total size in an eight-byte header before the
+/// pointer it returns, so `abi_free` can recover the layout — the host's `__free`
+/// passes only a pointer. That is why this is a real allocator and not the
+/// bump-and-leak the hand-written fixtures use.
+///
+/// Matrix row A.ABI.CODEC.DECLAREDTYPES.
+#[doc(hidden)]
+pub fn abi_alloc(size: i32) -> i32 {
+    if size <= 0 {
+        return 0;
+    }
+    let total = match (size as usize).checked_add(ABI_ALLOC_HEADER) {
+        Some(t) => t,
+        None => return 0,
+    };
+    let layout = match core::alloc::Layout::from_size_align(total, ABI_ALLOC_ALIGN) {
+        Ok(l) => l,
+        Err(_) => return 0,
+    };
+    // Safety: the layout is non-zero and correctly aligned.
+    let base = unsafe { alloc::alloc::alloc(layout) };
+    if base.is_null() {
+        return 0;
+    }
+    // Safety: the header fits by construction and `base` is 8-byte aligned.
+    unsafe { core::ptr::write(base as *mut u64, total as u64) };
+    (base as usize + ABI_ALLOC_HEADER) as i32
+}
+
+/// Releases a block `abi_alloc` returned. A pointer this did not produce is
+/// ignored rather than freed: the header would be whatever happened to precede
+/// it, and deallocating on that is worse than leaking.
+#[doc(hidden)]
+pub fn abi_free(ptr: i32) {
+    if ptr <= ABI_ALLOC_HEADER as i32 {
+        return;
+    }
+    let base = (ptr as usize - ABI_ALLOC_HEADER) as *mut u8;
+    // Safety: `base` was produced by abi_alloc, so the header is ours.
+    let total = unsafe { core::ptr::read(base as *const u64) } as usize;
+    if total <= ABI_ALLOC_HEADER {
+        return;
+    }
+    if let Ok(layout) = core::alloc::Layout::from_size_align(total, ABI_ALLOC_ALIGN) {
+        // Safety: same layout abi_alloc used.
+        unsafe { alloc::alloc::dealloc(base, layout) };
+    }
+}
+
+const ABI_ALLOC_HEADER: usize = 8;
+const ABI_ALLOC_ALIGN: usize = 8;
+
 pub use infrix_types;
 
 // Re-export types and macros
 pub use infrix_types::{
     self as types, Address, CallResult, Context, Decode, Encode, Error, Event, EventTrait,
-    FunctionAbi, Hash, IntoResult, Mutability, Signature, SignatureType, Topic, U256,
+    FunctionAbi, Hash, IntoResult, Mutability, Recipient, Signature, SignatureType, Topic, U256,
 };
 
 pub use infrix_macros::{call, contract, contract_impl, event, init, storage_map, view};
@@ -123,7 +197,7 @@ pub mod testing;
 pub mod prelude {
     pub use crate::types::{
         Address, CallResult, Context, Decode, Encode, Error, Event, EventTrait, FunctionAbi, Hash,
-        IntoResult, Mutability, Signature, SignatureType, Topic, U256,
+        IntoResult, Mutability, Recipient, Signature, SignatureType, Topic, U256,
     };
 
     pub use crate::{call, contract, contract_impl, event, init, storage_map, view};
@@ -137,9 +211,9 @@ pub mod prelude {
     pub use crate::storage;
 
     // Reusable, composable components (the OpenZeppelin analogs) — DX P6-2.
-    pub use crate::access;   // Ownable, AccessControl
+    pub use crate::access; // Ownable, AccessControl
     pub use crate::security; // Pausable
-    pub use crate::tokens;   // acu20::{Token, Acu20}, acu721, acu1155
+    pub use crate::tokens; // acu20::{Token, Acu20}, acu721, acu1155
 }
 
 // =============================================================================
@@ -171,9 +245,13 @@ mod host {
         pub fn host_env_owner(output_ptr: *mut u8) -> i32;
         pub fn host_env_block_height() -> u64;
         pub fn host_env_block_time() -> u64;
-        pub fn host_env_value(output_ptr: *mut u8);
+        pub fn host_env_value(output_ptr: *mut u8) -> i32;
         pub fn host_env_gas_remaining() -> u64;
-        pub fn host_env_tx_hash(output_ptr: *mut u8);
+        pub fn host_env_tx_hash(output_ptr: *mut u8) -> i32;
+        // True only when the host attached a complete intent + plan-step
+        // context. A `#[governed]` wrapper must submit a child intent outside
+        // that context; treating a missing probe as true would bypass it.
+        pub fn host_env_is_governed() -> i32;
 
         // L0 Account Operations
         pub fn host_l0_get_account(url_ptr: *const u8, url_len: u32, output_ptr: *mut u8) -> i32;
@@ -273,112 +351,65 @@ mod host {
         // === Governance Host Functions ===
 
         // Intent operations
-        pub fn host_governance_submit_intent(
-            goal_ptr: *const u8,
-            goal_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
-        pub fn host_governance_get_intent_status(
-            intent_id_ptr: *const u8,
-            intent_id_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
 
         // Object operations
-        pub fn host_governance_create_object(
-            obj_type_ptr: *const u8,
-            obj_type_len: u32,
-            fields_ptr: *const u8,
-            fields_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
-        pub fn host_governance_get_object(
-            obj_type_ptr: *const u8,
-            obj_type_len: u32,
-            id_ptr: *const u8,
-            id_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
-        pub fn host_governance_transition_object(
-            obj_type_ptr: *const u8,
-            obj_type_len: u32,
-            id_ptr: *const u8,
-            id_len: u32,
-            state_ptr: *const u8,
-            state_len: u32,
-        ) -> i32;
 
         // Approval operations
-        pub fn host_governance_require_approval(
-            role_ptr: *const u8,
-            role_len: u32,
-            threshold: u32,
-        ) -> i32;
-        pub fn host_governance_check_approval(plan_id_ptr: *const u8, plan_id_len: u32) -> i32;
 
         // Trust operations
-        pub fn host_governance_get_trust_profile(
-            profile_id_ptr: *const u8,
-            profile_id_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
-        pub fn host_governance_evaluate_trust(
-            profile_id_ptr: *const u8,
-            profile_id_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
 
         // Capability operations
-        pub fn host_governance_has_capability(
-            identity_ptr: *const u8,
-            identity_len: u32,
-            cap_ptr: *const u8,
-            cap_len: u32,
-        ) -> i32;
-        pub fn host_governance_grant_capability(
-            grantee_ptr: *const u8,
-            grantee_len: u32,
-            caps_ptr: *const u8,
-            caps_len: u32,
-            scope_ptr: *const u8,
-            scope_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
-        pub fn host_governance_revoke_capability(grant_id_ptr: *const u8, grant_id_len: u32)
-            -> i32;
 
         // Role operations
-        pub fn host_governance_has_role(
-            identity_ptr: *const u8,
-            identity_len: u32,
-            role_ptr: *const u8,
-            role_len: u32,
-        ) -> i32;
-        pub fn host_governance_assign_role(
-            identity_ptr: *const u8,
-            identity_len: u32,
-            role_ptr: *const u8,
-            role_len: u32,
-            scope_ptr: *const u8,
-            scope_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
 
         // Evidence operations
-        pub fn host_governance_get_evidence(
-            intent_id_ptr: *const u8,
-            intent_id_len: u32,
-            output_ptr: *mut u8,
-        ) -> i32;
 
         // Policy operations
-        pub fn host_governance_evaluate_policy(
-            scope_ptr: *const u8,
-            scope_len: u32,
-            op_type_ptr: *const u8,
-            op_type_len: u32,
-            operands_ptr: *const u8,
-            operands_len: u32,
+
+        // Objects and capabilities: READS the platform serves. A contract may
+        // read governance state; it may not initiate a governance write
+        // (see the governance module).
+        // The canonical contract -> governance channel: a contract may not
+        // mutate governed state directly, but it MAY submit a child intent,
+        // which runs the full spine and therefore has its own plan, approvals
+        // and evidence. Requires the "intent:submit" capability in the
+        // contract's manifest.
+        pub fn host_intent_submit(
+            goal_type_ptr: *const u8,
+            goal_type_len: u32,
+            params_ptr: *const u8,
+            params_len: u32,
+            out_id_ptr: *mut u8,
+            out_id_max_len: u32,
+        ) -> i32;
+        // A policy decision about the CALLING contract's own scope. The
+        // contract names only the policy TYPE: the scope is pinned by the host
+        // and the evaluation context is the platform's, describing this
+        // execution as it actually is.
+        // Whether the approvals backing the plan this contract is executing
+        // under are STILL valid. No argument: a contract can only truthfully be
+        // told about its own authorising context.
+        //   1 satisfied / 0 not satisfied / negative: could not be answered.
+        pub fn host_approvals_satisfied() -> i32;
+        pub fn host_policy_evaluate(type_ptr: *const u8, type_len: u32, output_ptr: *mut u8)
+            -> i32;
+        pub fn host_object_read(
+            type_ptr: *const u8,
+            type_len: u32,
+            id_ptr: *const u8,
+            id_len: u32,
+            output_ptr: *mut u8,
+        ) -> i32;
+        pub fn host_object_query(
+            type_ptr: *const u8,
+            type_len: u32,
+            filter_ptr: *const u8,
+            filter_len: u32,
+            output_ptr: *mut u8,
+        ) -> i32;
+        pub fn host_capability_query(
+            grantee_ptr: *const u8,
+            grantee_len: u32,
             output_ptr: *mut u8,
         ) -> i32;
     }
@@ -397,6 +428,9 @@ mod host {
         static STORAGE: RefCell<HashMap<Vec<u8>, Vec<u8>>> = RefCell::new(HashMap::new());
         static CALLER: RefCell<Vec<u8>> = RefCell::new(vec![0u8; 256]);
         static BLOCK_HEIGHT: RefCell<u64> = RefCell::new(1);
+        static GOVERNED_CONTEXT: RefCell<bool> = const { RefCell::new(false) };
+        static LAST_INTENT_SUBMISSION: RefCell<Option<(String, Vec<u8>)>> = const { RefCell::new(None) };
+        static SELF_ADDRESS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     }
 
     pub unsafe fn host_storage_get(key_ptr: *const u8, key_len: u32, value_ptr: *mut u8) -> i32 {
@@ -479,8 +513,27 @@ mod host {
     }
 
     pub unsafe fn host_env_self_address(output_ptr: *mut u8) -> i32 {
-        let _ = output_ptr;
-        0
+        #[cfg(feature = "std")]
+        {
+            SELF_ADDRESS.with(|addr| {
+                let addr = addr.borrow();
+                core::ptr::copy_nonoverlapping(addr.as_ptr(), output_ptr, addr.len());
+                addr.len() as i32
+            })
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = output_ptr;
+            0
+        }
+    }
+
+    /// Sets the address the native host reports as this contract's own. Unset it
+    /// is empty, as it always was; a test that needs a realistic call site (the
+    /// `contract` a `#[governed]` call names) sets it.
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) fn set_self_address_for_test(address: &str) {
+        SELF_ADDRESS.with(|addr| *addr.borrow_mut() = address.as_bytes().to_vec());
     }
 
     pub unsafe fn host_env_owner(output_ptr: *mut u8) -> i32 {
@@ -503,21 +556,113 @@ mod host {
         1704067200 // 2024-01-01 00:00:00 UTC
     }
 
-    pub unsafe fn host_env_value(output_ptr: *mut u8) {
+    pub unsafe fn host_env_value(output_ptr: *mut u8) -> i32 {
         // Zero value
         for i in 0..32 {
             *output_ptr.add(i) = 0;
         }
+        32
     }
 
     pub unsafe fn host_env_gas_remaining() -> u64 {
         1_000_000
     }
 
-    pub unsafe fn host_env_tx_hash(output_ptr: *mut u8) {
+    pub unsafe fn host_env_is_governed() -> i32 {
+        #[cfg(feature = "std")]
+        {
+            GOVERNED_CONTEXT.with(|governed| i32::from(*governed.borrow()))
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            0
+        }
+    }
+
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) fn set_governed_context_for_test(governed: bool) {
+        GOVERNED_CONTEXT.with(|value| *value.borrow_mut() = governed);
+    }
+
+    /// The native host cannot run a spine, so it refuses every child intent. It
+    /// RECORDS what was submitted first, so a test can inspect the goal type and
+    /// the parameter map a real call site (the `#[governed]` expansion, say)
+    /// handed to the host, rather than trusting a description of it.
+    pub unsafe fn host_intent_submit(
+        goal_type_ptr: *const u8,
+        goal_type_len: u32,
+        params_ptr: *const u8,
+        params_len: u32,
+        _out_id_ptr: *mut u8,
+        _out_id_max_len: u32,
+    ) -> i32 {
+        #[cfg(feature = "std")]
+        {
+            let goal = core::slice::from_raw_parts(goal_type_ptr, goal_type_len as usize);
+            let params = core::slice::from_raw_parts(params_ptr, params_len as usize);
+            LAST_INTENT_SUBMISSION.with(|last| {
+                *last.borrow_mut() = Some((String::from_utf8_lossy(goal).into_owned(), params.to_vec()));
+            });
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = (goal_type_ptr, goal_type_len, params_ptr, params_len);
+        }
+        -1
+    }
+
+    /// The most recent child intent this thread submitted to the native host:
+    /// (goal type, parameter-map bytes).
+    #[cfg(all(test, feature = "std"))]
+    pub(crate) fn last_intent_submission_for_test() -> Option<(String, Vec<u8>)> {
+        LAST_INTENT_SUBMISSION.with(|last| last.borrow_mut().take())
+    }
+
+    pub unsafe fn host_approvals_satisfied() -> i32 {
+        -1
+    }
+
+    pub unsafe fn host_policy_evaluate(
+        _type_ptr: *const u8,
+        _type_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
+        -1
+    }
+
+    pub unsafe fn host_object_read(
+        _type_ptr: *const u8,
+        _type_len: u32,
+        _id_ptr: *const u8,
+        _id_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
+        -1
+    }
+
+    pub unsafe fn host_object_query(
+        _type_ptr: *const u8,
+        _type_len: u32,
+        _filter_ptr: *const u8,
+        _filter_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
+        -1
+    }
+
+    pub unsafe fn host_capability_query(
+        _grantee_ptr: *const u8,
+        _grantee_len: u32,
+        _output_ptr: *mut u8,
+    ) -> i32 {
+        -1
+    }
+
+    pub unsafe fn host_env_tx_hash(output_ptr: *mut u8) -> i32 {
         for i in 0..32 {
             *output_ptr.add(i) = 0;
         }
+        32
     }
 
     pub unsafe fn host_l0_get_account(
@@ -824,102 +969,6 @@ mod host {
     }
 
     // Governance host function mocks
-    pub unsafe fn host_governance_submit_intent(_: *const u8, _: u32, _: *mut u8) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_get_intent_status(_: *const u8, _: u32, _: *mut u8) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_create_object(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *mut u8,
-    ) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_get_object(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *mut u8,
-    ) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_transition_object(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-    ) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_require_approval(_: *const u8, _: u32, _: u32) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_check_approval(_: *const u8, _: u32) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_get_trust_profile(_: *const u8, _: u32, _: *mut u8) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_evaluate_trust(_: *const u8, _: u32, _: *mut u8) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_has_capability(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-    ) -> i32 {
-        0
-    }
-    pub unsafe fn host_governance_grant_capability(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *mut u8,
-    ) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_revoke_capability(_: *const u8, _: u32) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_has_role(_: *const u8, _: u32, _: *const u8, _: u32) -> i32 {
-        0
-    }
-    pub unsafe fn host_governance_assign_role(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *mut u8,
-    ) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_get_evidence(_: *const u8, _: u32, _: *mut u8) -> i32 {
-        -1
-    }
-    pub unsafe fn host_governance_evaluate_policy(
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *const u8,
-        _: u32,
-        _: *mut u8,
-    ) -> i32 {
-        -1
-    }
 }
 
 // =============================================================================
@@ -1117,12 +1166,11 @@ pub mod env {
     /// part of intent dispatch). When false, `#[governed]` methods
     /// will submit a new intent instead of executing their body.
     ///
-    /// Default implementation returns true (assume we're always in a
-    /// governed context when running inside the runtime). Operators
-    /// wire the host probe at deploy time if they need re-entrancy
-    /// distinction.
+    /// The value is host-attested. It is false when no complete intent/plan-step
+    /// context exists; `#[governed]` must then submit a child intent rather than
+    /// executing its body directly.
     pub fn is_governed_context() -> bool {
-        true
+        unsafe { host::host_env_is_governed() == 1 }
     }
 
     /// Get the contract owner's address
@@ -1145,7 +1193,7 @@ pub mod env {
     /// Get the value (tokens) sent with the call
     pub fn value() -> U256 {
         let mut buffer = [0u8; 32];
-        unsafe { host::host_env_value(buffer.as_mut_ptr()) };
+        let _ = unsafe { host::host_env_value(buffer.as_mut_ptr()) };
         U256::from_be_bytes(&buffer)
     }
 
@@ -1157,7 +1205,7 @@ pub mod env {
     /// Get the transaction hash
     pub fn tx_hash() -> Hash {
         let mut buffer = [0u8; 32];
-        unsafe { host::host_env_tx_hash(buffer.as_mut_ptr()) };
+        let _ = unsafe { host::host_env_tx_hash(buffer.as_mut_ptr()) };
         Hash(buffer)
     }
 
@@ -1350,9 +1398,25 @@ pub mod l0 {
         }
     }
 
-    /// Create an L0 account
+    /// Create an L0 account.
     ///
-    /// The contract must have authority over the parent ADI to create sub-accounts.
+    /// Served by the node's ONE governed L0 write path (infrix-core matrix row
+    /// C.EXECUTOR.L0WRITE.SERVED, proven on Kermit 2026-09-03). The write is
+    /// performed only when ALL of the following hold, and answers an error
+    /// otherwise:
+    ///
+    /// * the call runs inside a governed `CONTRACT_CALL` intent's plan step;
+    /// * the intent's spine-verified actor governs the parent identity on chain;
+    /// * this contract DECLARED `account:create` in its `infrix:manifest`
+    ///   custom section (a JSON `ContractManifest`; a module importing this
+    ///   function without the declaration is refused at deploy);
+    /// * only a DATA account (`AccountType::Data`) can be created this way;
+    /// * the step's gas budget (`customParams.gasLimit`, default 5000) covers
+    ///   the 10000-gas charge of a network write.
+    ///
+    /// The node signs with its configured L0 signer, draws its timestamp from a
+    /// durable nonce store, waits for delivery, and records the network's
+    /// transaction id on the execution recording.
     pub fn create_account(url: &Address, account_type: AccountType) -> Result<(), Error> {
         let url_bytes = url.as_bytes();
 
@@ -1371,9 +1435,19 @@ pub mod l0 {
         }
     }
 
-    /// Write data to an L0 Data Account
+    /// Write data to an L0 Data Account.
     ///
-    /// Returns the entry hash on success.
+    /// Served by the node's ONE governed L0 write path (infrix-core matrix row
+    /// C.EXECUTOR.L0WRITE.SERVED, proven on Kermit 2026-09-03): the write lands
+    /// only inside a governed `CONTRACT_CALL` intent, only when the intent's
+    /// spine-verified actor governs `url` on chain, only when this contract
+    /// declared `data:write` in its `infrix:manifest` custom section, and only
+    /// when the step's gas budget (`customParams.gasLimit`) covers the
+    /// 10000-gas charge. The node signs with its configured L0 signer, waits
+    /// for delivery, and records the network transaction id as evidence.
+    /// Any other condition is an error — never a fabricated success.
+    ///
+    /// Returns the entry hash computed from `data` on success.
     pub fn write_data(url: &Address, data: &[u8]) -> Result<Hash, Error> {
         let url_bytes = url.as_bytes();
 
@@ -1394,9 +1468,15 @@ pub mod l0 {
         }
     }
 
-    /// Transfer tokens between L0 accounts
+    /// Transfer tokens between L0 accounts.
     ///
-    /// The contract must have authority over the source account.
+    /// Served by the node's ONE governed L0 write path (infrix-core matrix row
+    /// C.EXECUTOR.L0WRITE.SERVED): only inside a governed `CONTRACT_CALL`
+    /// intent, only when the intent's spine-verified actor governs `from` on
+    /// chain, only when this contract declared `token:transfer` in its
+    /// `infrix:manifest` custom section, and only within the step's gas
+    /// budget (`customParams.gasLimit`). `amount` is in the token's smallest
+    /// unit. Anything else is an error.
     pub fn transfer(from: &Address, to: &Address, amount: &U256) -> Result<(), Error> {
         let from_bytes = from.as_bytes();
         let to_bytes = to.as_bytes();
@@ -1419,9 +1499,14 @@ pub mod l0 {
         }
     }
 
-    /// Burn credits from an L0 account
+    /// Burn credits from an L0 key page.
     ///
-    /// Credits are used to pay for L0 operations.
+    /// Served by the node's ONE governed L0 write path (infrix-core matrix row
+    /// C.EXECUTOR.L0WRITE.SERVED): only inside a governed `CONTRACT_CALL`
+    /// intent, only when the intent's spine-verified actor governs `url` on
+    /// chain, only when this contract declared `token:burn` in its
+    /// `infrix:manifest` custom section, and only within the step's gas
+    /// budget. Credits are used to pay for L0 operations.
     pub fn burn_credits(url: &Address, amount: u64) -> Result<(), Error> {
         let url_bytes = url.as_bytes();
 
@@ -1493,7 +1578,16 @@ pub mod l0 {
         })
     }
 
-    /// Check if a signer has authority over an L0 account
+    /// Check whether `signer` holds authority over the L0 account at `url`.
+    ///
+    /// Authority is granted on proof of a key, not on knowledge of a public
+    /// value: the host answers `true` only when `signer` names the identity
+    /// (or a key page / key hash of the identity) whose signature the Infrix
+    /// spine verified for the governed intent that led to this contract call,
+    /// AND a key page of that identity governs `url` on chain. Naming any
+    /// other identity's page or key — even one that genuinely governs the
+    /// account — yields `false`, as does an execution with no verified actor.
+    /// (infrix-core matrix row C.HOSTBRIDGE.AUTHORITY.VERIFIED, 2026-09-03.)
     pub fn check_authority(url: &Address, signer: &Address) -> bool {
         let url_bytes = url.as_bytes();
         let signer_bytes = signer.as_bytes();
@@ -1928,12 +2022,22 @@ pub mod tokens {
 
             /// Create a token facade with fixed metadata.
             pub const fn new(name: &'static str, symbol: &'static str, decimals: u8) -> Self {
-                Self { token_name: name, token_symbol: symbol, token_decimals: decimals }
+                Self {
+                    token_name: name,
+                    token_symbol: symbol,
+                    token_decimals: decimals,
+                }
             }
 
-            fn balances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::BAL) }
-            fn allowances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::ALW) }
-            fn supply(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::SUP) }
+            fn balances(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::BAL)
+            }
+            fn allowances(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::ALW)
+            }
+            fn supply(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::SUP)
+            }
 
             /// Mint `amount` to `to`, increasing total supply. Call from `#[init]`
             /// or an owner-gated `#[call]`.
@@ -1959,9 +2063,16 @@ pub mod tokens {
                 n + s.len()
             }
 
-            fn move_tokens(&self, from: &Address, to: &Address, amount: &U256) -> Result<(), Error> {
+            fn move_tokens(
+                &self,
+                from: &Address,
+                to: &Address,
+                amount: &U256,
+            ) -> Result<(), Error> {
                 let from_bal = self.balance_of(from);
-                let new_from = from_bal.checked_sub(amount).ok_or(Error::InsufficientBalance)?;
+                let new_from = from_bal
+                    .checked_sub(amount)
+                    .ok_or(Error::InsufficientBalance)?;
                 let to_bal = self.balance_of(to);
                 let new_to = to_bal.checked_add(amount).ok_or(Error::Overflow)?;
                 self.balances().set_encoded(from.as_bytes(), &new_from)?;
@@ -1971,15 +2082,25 @@ pub mod tokens {
         }
 
         impl Token for Acu20 {
-            fn name(&self) -> &str { self.token_name }
-            fn symbol(&self) -> &str { self.token_symbol }
-            fn decimals(&self) -> u8 { self.token_decimals }
+            fn name(&self) -> &str {
+                self.token_name
+            }
+            fn symbol(&self) -> &str {
+                self.token_symbol
+            }
+            fn decimals(&self) -> u8 {
+                self.token_decimals
+            }
 
             fn total_supply(&self) -> U256 {
-                self.supply().get_decoded::<U256>(b"total").unwrap_or(U256::ZERO)
+                self.supply()
+                    .get_decoded::<U256>(b"total")
+                    .unwrap_or(U256::ZERO)
             }
             fn balance_of(&self, owner: &Address) -> U256 {
-                self.balances().get_decoded::<U256>(owner.as_bytes()).unwrap_or(U256::ZERO)
+                self.balances()
+                    .get_decoded::<U256>(owner.as_bytes())
+                    .unwrap_or(U256::ZERO)
             }
             fn transfer(&mut self, to: &Address, amount: &U256) -> Result<bool, Error> {
                 let from = env::caller();
@@ -1996,9 +2117,16 @@ pub mod tokens {
             fn allowance(&self, owner: &Address, spender: &Address) -> U256 {
                 let mut key = [0u8; 200];
                 let n = Self::alw_key(owner, spender, &mut key);
-                self.allowances().get_decoded::<U256>(&key[..n]).unwrap_or(U256::ZERO)
+                self.allowances()
+                    .get_decoded::<U256>(&key[..n])
+                    .unwrap_or(U256::ZERO)
             }
-            fn transfer_from(&mut self, from: &Address, to: &Address, amount: &U256) -> Result<bool, Error> {
+            fn transfer_from(
+                &mut self,
+                from: &Address,
+                to: &Address,
+                amount: &U256,
+            ) -> Result<bool, Error> {
                 let spender = env::caller();
                 let allowed = self.allowance(from, &spender);
                 let new_allowed = allowed.checked_sub(amount).ok_or(Error::Unauthorized)?;
@@ -2121,20 +2249,40 @@ pub mod tokens {
                 symbol: &'static str,
                 base_uri: &'static str,
             ) -> Self {
-                Self { collection_name: name, collection_symbol: symbol, base_uri }
+                Self {
+                    collection_name: name,
+                    collection_symbol: symbol,
+                    base_uri,
+                }
             }
 
             /// Collection name.
-            pub fn name(&self) -> &str { self.collection_name }
+            pub fn name(&self) -> &str {
+                self.collection_name
+            }
             /// Collection symbol.
-            pub fn symbol(&self) -> &str { self.collection_symbol }
+            pub fn symbol(&self) -> &str {
+                self.collection_symbol
+            }
 
-            fn owners(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::OWN) }
-            fn balances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::BAL) }
-            fn approvals(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::APP) }
-            fn operators(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::OPR) }
-            fn counter(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::CNT) }
-            fn royalties(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::ROY) }
+            fn owners(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::OWN)
+            }
+            fn balances(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::BAL)
+            }
+            fn approvals(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::APP)
+            }
+            fn operators(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::OPR)
+            }
+            fn counter(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::CNT)
+            }
+            fn royalties(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::ROY)
+            }
 
             fn opr_key(owner: &Address, operator: &Address, buf: &mut [u8; 200]) -> usize {
                 let o = owner.as_bytes();
@@ -2171,7 +2319,10 @@ pub mod tokens {
             /// Mint the next sequential token id to `to`, returning it — the
             /// gas-friendly auto-increment mint (the ERC721A-style convenience).
             pub fn mint_next(&self, to: &Address) -> Result<U256, Error> {
-                let id = self.counter().get_decoded::<U256>(b"next").unwrap_or(U256::ZERO);
+                let id = self
+                    .counter()
+                    .get_decoded::<U256>(b"next")
+                    .unwrap_or(U256::ZERO);
                 self.mint(to, &id)?;
                 let next = id.checked_add(&U256::ONE).ok_or(Error::Overflow)?;
                 self.counter().set_encoded(b"next", &next)?;
@@ -2180,14 +2331,21 @@ pub mod tokens {
 
             /// Set the collection-wide EIP-2981 royalty: `fee_bps` basis points
             /// (e.g. 250 = 2.5%) paid to `receiver`.
-            pub fn set_default_royalty(&self, receiver: &Address, fee_bps: u16) -> Result<(), Error> {
+            pub fn set_default_royalty(
+                &self,
+                receiver: &Address,
+                fee_bps: u16,
+            ) -> Result<(), Error> {
                 self.royalties().set_encoded(b"recv", receiver)?;
                 self.royalties().set_encoded(b"frac", &fee_bps)
             }
 
             /// EIP-2981: the royalty (receiver, amount) owed on a `sale_price`.
             pub fn royalty_info(&self, _token_id: &U256, sale_price: &U256) -> (Address, U256) {
-                let receiver = self.royalties().get_decoded::<Address>(b"recv").unwrap_or(Address::empty());
+                let receiver = self
+                    .royalties()
+                    .get_decoded::<Address>(b"recv")
+                    .unwrap_or(Address::empty());
                 let bps = self.royalties().get_decoded::<u16>(b"frac").unwrap_or(0);
                 let amount = sale_price
                     .checked_mul(&U256::from(bps as u64))
@@ -2210,10 +2368,13 @@ pub mod tokens {
 
         impl NFT for Acu721 {
             fn owner_of(&self, token_id: &U256) -> Option<Address> {
-                self.owners().get_decoded::<Address>(&token_id.to_be_bytes())
+                self.owners()
+                    .get_decoded::<Address>(&token_id.to_be_bytes())
             }
             fn balance_of(&self, owner: &Address) -> U256 {
-                self.balances().get_decoded::<U256>(owner.as_bytes()).unwrap_or(U256::ZERO)
+                self.balances()
+                    .get_decoded::<U256>(owner.as_bytes())
+                    .unwrap_or(U256::ZERO)
             }
             fn approve(&mut self, to: &Address, token_id: &U256) -> Result<(), Error> {
                 let owner = self.owner_of(token_id).ok_or(Error::InvalidState)?;
@@ -2224,9 +2385,14 @@ pub mod tokens {
                 self.approvals().set_encoded(&token_id.to_be_bytes(), to)
             }
             fn get_approved(&self, token_id: &U256) -> Option<Address> {
-                self.approvals().get_decoded::<Address>(&token_id.to_be_bytes())
+                self.approvals()
+                    .get_decoded::<Address>(&token_id.to_be_bytes())
             }
-            fn set_approval_for_all(&mut self, operator: &Address, approved: bool) -> Result<(), Error> {
+            fn set_approval_for_all(
+                &mut self,
+                operator: &Address,
+                approved: bool,
+            ) -> Result<(), Error> {
                 let owner = env::caller();
                 let mut key = [0u8; 200];
                 let n = Self::opr_key(&owner, operator, &mut key);
@@ -2235,9 +2401,16 @@ pub mod tokens {
             fn is_approved_for_all(&self, owner: &Address, operator: &Address) -> bool {
                 let mut key = [0u8; 200];
                 let n = Self::opr_key(owner, operator, &mut key);
-                self.operators().get_decoded::<bool>(&key[..n]).unwrap_or(false)
+                self.operators()
+                    .get_decoded::<bool>(&key[..n])
+                    .unwrap_or(false)
             }
-            fn transfer_from(&mut self, from: &Address, to: &Address, token_id: &U256) -> Result<(), Error> {
+            fn transfer_from(
+                &mut self,
+                from: &Address,
+                to: &Address,
+                token_id: &U256,
+            ) -> Result<(), Error> {
                 let owner = self.owner_of(token_id).ok_or(Error::InvalidState)?;
                 if &owner != from {
                     return Err(Error::InvalidArgument);
@@ -2252,7 +2425,11 @@ pub mod tokens {
                 self.bump_balance(to, true)
             }
             fn token_uri(&self, _token_id: &U256) -> Option<&str> {
-                if self.base_uri.is_empty() { None } else { Some(self.base_uri) }
+                if self.base_uri.is_empty() {
+                    None
+                } else {
+                    Some(self.base_uri)
+                }
             }
         }
     }
@@ -2339,8 +2516,12 @@ pub mod tokens {
                 Self { base_uri }
             }
 
-            fn balances(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::BAL) }
-            fn operators(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(Self::OPR) }
+            fn balances(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::BAL)
+            }
+            fn operators(&self) -> storage::StorageMap<'static> {
+                storage::StorageMap::new(Self::OPR)
+            }
 
             fn bal_key(owner: &Address, token_id: &U256, buf: &mut [u8; 200]) -> usize {
                 let o = owner.as_bytes();
@@ -2379,9 +2560,15 @@ pub mod tokens {
             fn balance_of(&self, owner: &Address, token_id: &U256) -> U256 {
                 let mut key = [0u8; 200];
                 let n = Self::bal_key(owner, token_id, &mut key);
-                self.balances().get_decoded::<U256>(&key[..n]).unwrap_or(U256::ZERO)
+                self.balances()
+                    .get_decoded::<U256>(&key[..n])
+                    .unwrap_or(U256::ZERO)
             }
-            fn set_approval_for_all(&mut self, operator: &Address, approved: bool) -> Result<(), Error> {
+            fn set_approval_for_all(
+                &mut self,
+                operator: &Address,
+                approved: bool,
+            ) -> Result<(), Error> {
                 let owner = env::caller();
                 let mut key = [0u8; 200];
                 let n = Self::opr_key(&owner, operator, &mut key);
@@ -2390,7 +2577,9 @@ pub mod tokens {
             fn is_approved_for_all(&self, owner: &Address, operator: &Address) -> bool {
                 let mut key = [0u8; 200];
                 let n = Self::opr_key(owner, operator, &mut key);
-                self.operators().get_decoded::<bool>(&key[..n]).unwrap_or(false)
+                self.operators()
+                    .get_decoded::<bool>(&key[..n])
+                    .unwrap_or(false)
             }
             fn safe_transfer_from(
                 &mut self,
@@ -2405,7 +2594,9 @@ pub mod tokens {
                     return Err(Error::Unauthorized);
                 }
                 let from_bal = self.balance_of(from, token_id);
-                let new_from = from_bal.checked_sub(amount).ok_or(Error::InsufficientBalance)?;
+                let new_from = from_bal
+                    .checked_sub(amount)
+                    .ok_or(Error::InsufficientBalance)?;
                 let to_bal = self.balance_of(to, token_id);
                 let new_to = to_bal.checked_add(amount).ok_or(Error::Overflow)?;
                 let mut fk = [0u8; 200];
@@ -2416,7 +2607,11 @@ pub mod tokens {
                 self.balances().set_encoded(&tk[..tlen], &new_to)
             }
             fn uri(&self, _token_id: &U256) -> Option<&str> {
-                if self.base_uri.is_empty() { None } else { Some(self.base_uri) }
+                if self.base_uri.is_empty() {
+                    None
+                } else {
+                    Some(self.base_uri)
+                }
             }
         }
     }
@@ -2437,14 +2632,24 @@ pub mod access {
     }
     impl Ownable {
         /// Namespace this component under a storage slot.
-        pub const fn new(slot: &'static [u8]) -> Self { Self { slot } }
+        pub const fn new(slot: &'static [u8]) -> Self {
+            Self { slot }
+        }
         /// The standard `ownable_` slot.
-        pub const fn standard() -> Self { Self { slot: b"ownable_" } }
-        fn map(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(self.slot) }
+        pub const fn standard() -> Self {
+            Self { slot: b"ownable_" }
+        }
+        fn map(&self) -> storage::StorageMap<'static> {
+            storage::StorageMap::new(self.slot)
+        }
         /// Set the initial owner (call once, from `#[init]`).
-        pub fn init(&self, owner: &Address) -> Result<(), Error> { self.map().set_encoded(b"owner", owner) }
+        pub fn init(&self, owner: &Address) -> Result<(), Error> {
+            self.map().set_encoded(b"owner", owner)
+        }
         /// The current owner, if set.
-        pub fn owner(&self) -> Option<Address> { self.map().get_decoded::<Address>(b"owner") }
+        pub fn owner(&self) -> Option<Address> {
+            self.map().get_decoded::<Address>(b"owner")
+        }
         /// Ok if the caller is the owner, else `Error::Unauthorized`. Fail-closed:
         /// if no owner is set, this denies.
         pub fn only_owner(&self) -> Result<(), Error> {
@@ -2467,10 +2672,16 @@ pub mod access {
     }
     impl AccessControl {
         /// Namespace this component under a storage prefix.
-        pub const fn new(prefix: &'static [u8]) -> Self { Self { prefix } }
+        pub const fn new(prefix: &'static [u8]) -> Self {
+            Self { prefix }
+        }
         /// The standard `acl_` prefix.
-        pub const fn standard() -> Self { Self { prefix: b"acl_" } }
-        fn map(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(self.prefix) }
+        pub const fn standard() -> Self {
+            Self { prefix: b"acl_" }
+        }
+        fn map(&self) -> storage::StorageMap<'static> {
+            storage::StorageMap::new(self.prefix)
+        }
         fn key(role: &[u8], who: &Address, buf: &mut [u8; 200]) -> usize {
             let a = who.as_bytes();
             let mut n = 0usize;
@@ -2501,7 +2712,11 @@ pub mod access {
         }
         /// Ok if the caller holds `role`, else `Error::Unauthorized` (fail-closed).
         pub fn only_role(&self, role: &[u8]) -> Result<(), Error> {
-            if self.has_role(role, &env::caller()) { Ok(()) } else { Err(Error::Unauthorized) }
+            if self.has_role(role, &env::caller()) {
+                Ok(())
+            } else {
+                Err(Error::Unauthorized)
+            }
         }
     }
 }
@@ -2522,19 +2737,35 @@ pub mod security {
     }
     impl Pausable {
         /// Namespace this component under a storage slot.
-        pub const fn new(slot: &'static [u8]) -> Self { Self { slot } }
+        pub const fn new(slot: &'static [u8]) -> Self {
+            Self { slot }
+        }
         /// The standard `pausable_` slot.
-        pub const fn standard() -> Self { Self { slot: b"pausable_" } }
-        fn map(&self) -> storage::StorageMap<'static> { storage::StorageMap::new(self.slot) }
+        pub const fn standard() -> Self {
+            Self { slot: b"pausable_" }
+        }
+        fn map(&self) -> storage::StorageMap<'static> {
+            storage::StorageMap::new(self.slot)
+        }
         /// True if currently paused.
-        pub fn is_paused(&self) -> bool { self.map().get_decoded::<bool>(b"paused").unwrap_or(false) }
+        pub fn is_paused(&self) -> bool {
+            self.map().get_decoded::<bool>(b"paused").unwrap_or(false)
+        }
         /// Pause (gate this with `Ownable::only_owner`).
-        pub fn pause(&self) -> Result<(), Error> { self.map().set_encoded(b"paused", &true) }
+        pub fn pause(&self) -> Result<(), Error> {
+            self.map().set_encoded(b"paused", &true)
+        }
         /// Unpause.
-        pub fn unpause(&self) -> Result<(), Error> { self.map().set_encoded(b"paused", &false) }
+        pub fn unpause(&self) -> Result<(), Error> {
+            self.map().set_encoded(b"paused", &false)
+        }
         /// Ok if not paused, else `Error::InvalidState`.
         pub fn when_not_paused(&self) -> Result<(), Error> {
-            if self.is_paused() { Err(Error::InvalidState) } else { Ok(()) }
+            if self.is_paused() {
+                Err(Error::InvalidState)
+            } else {
+                Ok(())
+            }
         }
     }
 }

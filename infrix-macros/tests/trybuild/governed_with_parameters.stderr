@@ -1,0 +1,7 @@
+error: #[governed] cannot serialize function parameters; submit governance::submit_intent("CONTRACT_CALL", params_json) with the contract's declared parameter encoding instead of silently dropping arguments
+ --> tests/trybuild/governed_with_parameters.rs:1:1
+  |
+1 | #[infrix_sdk::governed]
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `infrix_sdk::governed` (in Nightly builds, run with -Z macro-backtrace for more info)

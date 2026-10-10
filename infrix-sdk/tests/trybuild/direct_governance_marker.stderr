@@ -1,0 +1,12 @@
+error[E0277]: the trait bound `Bypass: infrix_sdk::governance::refusal_seal::Sealed` is not satisfied
+ --> tests/trybuild/direct_governance_marker.rs:7:44
+  |
+7 | impl AContractMayNotInitiateGovernance for Bypass {}
+  |                                            ^^^^^^ the trait `infrix_sdk::governance::refusal_seal::Sealed` is not implemented for `Bypass`
+  |
+note: required by a bound in `AContractMayNotInitiateGovernance`
+ --> src/governance.rs
+  |
+  | pub trait AContractMayNotInitiateGovernance: refusal_seal::Sealed {}
+  |                                              ^^^^^^^^^^^^^^^^^^^^ required by this bound in `AContractMayNotInitiateGovernance`
+  = note: `AContractMayNotInitiateGovernance` is a "sealed trait", because to implement it you also need to implement `infrix_sdk::governance::refusal_seal::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it

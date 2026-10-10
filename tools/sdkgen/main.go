@@ -22,7 +22,7 @@ func repoRoot() string {
 }
 
 func main() {
-	check := flag.Bool("check", false, "verify the Rust goal-type enum matches infrix-schema (no writes); exit 1 on drift")
+	check := flag.Bool("check", false, "verify the Rust goal-type enum matches the vendored goal-vocabulary.json and the published-schema floor holds (no writes); exit 1 on drift")
 	flag.Parse()
 
 	changed, err := generate(repoRoot(), *check)
@@ -35,12 +35,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "sdkgen: stale Rust goal-type enum (regenerate with `go run .`): %v\n", changed)
 			os.Exit(1)
 		}
-		fmt.Println("sdkgen: Rust goal types are in sync with infrix-schema")
+		fmt.Println("sdkgen: Rust goal types are in sync with goal-vocabulary.json")
 		return
 	}
 	if len(changed) > 0 {
 		fmt.Printf("sdkgen: regenerated %v\n", changed)
 	} else {
-		fmt.Println("sdkgen: already in sync with infrix-schema")
+		fmt.Println("sdkgen: already in sync with goal-vocabulary.json")
 	}
 }

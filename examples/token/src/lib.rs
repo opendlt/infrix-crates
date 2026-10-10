@@ -48,10 +48,16 @@ impl DemoToken {
     }
 
     /// Transfer tokens — refused while the contract is paused.
+    ///
+    /// `to` is declared as a Recipient rather than a plain Address. That is what
+    /// makes this token ROUTABLE: the schema section records the parameter role,
+    /// and a router moving value along a path knows which argument the
+    /// destination goes in. `approve` below keeps a plain Address on purpose —
+    /// a spender is granted an allowance, it does not receive the asset.
     #[call]
-    pub fn transfer(&mut self, to: Address, amount: U256) -> Result<bool, Error> {
+    pub fn transfer(&mut self, to: Recipient, amount: U256) -> Result<bool, Error> {
         Pausable::standard().when_not_paused()?;
-        acu20().transfer(&to, &amount)
+        acu20().transfer(to.address(), &amount)
     }
 
     /// Approve a spender.
@@ -84,5 +90,36 @@ impl DemoToken {
     #[view]
     pub fn total_supply(&self) -> U256 {
         acu20().total_supply()
+    }
+}
+
+#[cfg(test)]
+mod routing_declaration_tests {
+    use super::*;
+
+    /// Matrix row A.DEFI.TRANSFERHOP.RECIPIENT — the end-to-end check on the
+    /// crates side: a REAL contract, compiled by the real macro, must publish a
+    /// recipient role in the `infrix:schema` section the platform reads.
+    ///
+    /// Every layer between the signature and the platform is exercised here:
+    /// the Recipient type, rust_type_to_role, the schema JSON builder, and the
+    /// section the macro embeds.
+    #[test]
+    fn test_the_token_publishes_a_routable_recipient() {
+        let schema = DemoToken::__schema_json();
+        assert!(
+            schema.contains(r#""name":"to","type":"address","role":"recipient""#),
+            "transfer's destination is not declared as a recipient, so a router cannot fill \
+             it and this token is unroutable. Schema: {}",
+            schema
+        );
+        // A spender is granted an allowance; it does not receive the asset, and
+        // a router must not deliver value to it.
+        assert!(
+            schema.contains(r#""name":"spender","type":"address"}"#),
+            "approve's spender was declared as a recipient; a router would deliver value to \
+             an account that was only being granted an allowance. Schema: {}",
+            schema
+        );
     }
 }

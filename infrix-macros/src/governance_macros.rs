@@ -2,7 +2,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::ItemFn;
+use syn::{FnArg, GenericArgument, ItemFn, PathArguments, ReturnType, Type};
 
 /// Generates the `#[require_role("role_name")]` attribute macro expansion.
 ///
@@ -143,11 +143,34 @@ pub fn generate_require_approval(
 ///
 /// ```ignore
 /// #[governed]
-/// pub fn large_transfer(&mut self, to: Address, amount: U256) -> Result<(), Error> {
+/// pub fn settle(&mut self) -> Result<(), Error> {
 ///     // This body becomes the execution target of an intent
 /// }
 /// ```
 pub fn generate_governed(input: &ItemFn) -> TokenStream {
+    // A child intent must carry every parameter the callee will receive. The
+    // old macro silently dropped all arguments, then reported a submitted
+    // contract call that could never execute as requested. Until this macro has
+    // a typed, schema-backed encoder for arbitrary function parameters, reject
+    // parameterised functions rather than forge an empty call.
+    if input
+        .sig
+        .inputs
+        .iter()
+        .any(|arg| matches!(arg, FnArg::Typed(_)))
+    {
+        return quote! {
+            compile_error!("#[governed] cannot serialize function parameters; submit governance::submit_intent(\"CONTRACT_CALL\", params_json) with the contract's declared parameter encoding instead of silently dropping arguments");
+        };
+    }
+    // The wrapper returns immediately after submitting its child intent. It can
+    // therefore faithfully implement only Result<(), E>; accepting another
+    // return shape would compile a method that fabricates no result.
+    if !returns_result_of_unit(&input.sig.output) {
+        return quote! {
+            compile_error!("#[governed] requires a Result<(), E> return type because submitting a child intent has no synchronous contract return value");
+        };
+    }
     let vis = &input.vis;
     let sig = &input.sig;
     let body = &input.block;
@@ -164,18 +187,42 @@ pub fn generate_governed(input: &ItemFn) -> TokenStream {
             if infrix_sdk::env::is_governed_context() {
                 #body
             } else {
-                // Serialize arguments and submit as intent
+                // The goal type and its parameter map are distinct host ABI
+                // arguments. Do not put goal_type in params: the host receives
+                // it separately and validates the map as this goal's payload.
                 let __self_addr = infrix_sdk::env::self_address().to_string().unwrap_or_default();
-                let __goal_json = infrix_sdk::governance::serialize_call_goal(
+                let __params_json = infrix_sdk::governance::serialize_call_goal(
                     &__self_addr,
                     #fn_name_str,
                 );
-                let _ = infrix_sdk::governance::submit_intent(&__goal_json)?;
+                let _ = infrix_sdk::governance::submit_intent(
+                    infrix_sdk::governance::CALL_GOAL_TYPE,
+                    &__params_json,
+                )?;
                 // The actual execution will happen when the intent is processed
                 Ok(())
             }
         }
     }
+}
+
+fn returns_result_of_unit(output: &ReturnType) -> bool {
+    let ReturnType::Type(_, ty) = output else {
+        return false;
+    };
+    let Type::Path(path) = ty.as_ref() else {
+        return false;
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Result" {
+        return false;
+    }
+    let PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    matches!(args.args.first(), Some(GenericArgument::Type(Type::Tuple(tuple))) if tuple.elems.is_empty())
 }
 
 /// Generates the `#[evidenced]` attribute macro expansion.

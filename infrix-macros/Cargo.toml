@@ -21,4 +21,5 @@ syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 # trigger a `cargo publish --dry-run` warning even when the dep is a
 # dev-dependency. Pin the registry version alongside the path.
 infrix-types = { path = "../infrix-types", version = "0.1.0" }
+infrix-sdk = { path = "../infrix-sdk", version = "0.1.0" }
 trybuild = "1.0"
