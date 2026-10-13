@@ -26,7 +26,7 @@
     {"goal":"CUSTOM","class":"custom","required":[],"refusedKeys":[]},
     {"goal":"DISCLOSURE_APPROVE","class":"system","required":[["grantId"]],"refusedKeys":[]},
     {"goal":"DISCLOSURE_EXPIRE","class":"system","required":[],"refusedKeys":[]},
-    {"goal":"DISCLOSURE_GRANT","class":"system","required":[["grantorIdentity"],["granteeIdentity"],["targetType"],["targetId"],["purpose"],["scopeType"],["workflowStageScope"]],"refusedKeys":[]},
+    {"goal":"DISCLOSURE_GRANT","class":"system","required":[["grantorIdentity"],["granteeIdentity"],["targetType"],["targetId"],["purpose"],["scopeType"],["workflowStageScope"]],"refusedKeys":["GrantID","GrantId","grantID","grant_id","grantid"]},
     {"goal":"DISCLOSURE_REGISTER_KEY","class":"system","required":[["authority"],["publicKey"]],"refusedKeys":[]},
     {"goal":"DISCLOSURE_REVOKE","class":"system","required":[["grantId"]],"refusedKeys":[]},
     {"goal":"DISPUTE_RESOLVE","class":"system","required":[["instructionId"],["verdict"]],"refusedKeys":[]},
