@@ -12,7 +12,7 @@
     {"goal":"BRIDGE_RECEIVE","class":"system","required":[["sourceChain"],["messageId"],["payloadHash"],["proofHex"]],"refusedKeys":[]},
     {"goal":"BRIDGE_SEND","class":"system","required":[["targetChain"],["legs"]],"refusedKeys":[]},
     {"goal":"CAPABILITY_EXPIRE","class":"system","required":[],"refusedKeys":[]},
-    {"goal":"CAPABILITY_GRANT","class":"system","required":[["granteeId"],["capabilities"],["workflowStageScope"],["purpose"]],"refusedKeys":["granteeDID"]},
+    {"goal":"CAPABILITY_GRANT","class":"system","required":[["granteeId"],["capabilities"],["workflowStageScope"],["purpose"]],"refusedKeys":["expiresAt","granteeDID"]},
     {"goal":"CAPABILITY_REVOKE","class":"system","required":[["grantId"]],"refusedKeys":["grantID"]},
     {"goal":"COMPOUND","class":"asset","required":[],"refusedKeys":[]},
     {"goal":"CONFIDENTIAL_EXEC","class":"system","required":[["environmentId"],["program"],["attestationId"],["trustProfileId"]],"refusedKeys":[]},
