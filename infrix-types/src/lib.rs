@@ -668,6 +668,11 @@ pub enum Error {
     RoleRequired = 32,
     /// Policy denied the operation
     PolicyDenied = 33,
+    /// The operation was accepted and runs later: a contract call to a callee on
+    /// another partition is admitted as a governed child intent and executed in a
+    /// later block, and its result returns as a governed callback. Not a refusal:
+    /// the caller reads the child intent id from the return data.
+    Pending = 34,
     /// Unknown error
     Unknown = 255,
 }
@@ -747,6 +752,7 @@ impl Error {
             31 => Self::CapabilityDenied,
             32 => Self::RoleRequired,
             33 => Self::PolicyDenied,
+            34 => Self::Pending,
             _ => Self::Unknown,
         }
     }
@@ -804,6 +810,7 @@ impl core::fmt::Display for Error {
             Self::CapabilityDenied => write!(f, "capability denied"),
             Self::RoleRequired => write!(f, "role required"),
             Self::PolicyDenied => write!(f, "policy denied"),
+            Self::Pending => write!(f, "pending: accepted, runs in a later block"),
             Self::Unknown => write!(f, "unknown error"),
         }
     }
@@ -2332,11 +2339,12 @@ mod tests {
             (Error::CapabilityDenied, 31),
             (Error::RoleRequired, 32),
             (Error::PolicyDenied, 33),
+            (Error::Pending, 34),
             (Error::Unknown, 255),
         ];
         assert_eq!(
             registry.len(),
-            35,
+            36,
             "a variant was added or removed without updating the pinned table"
         );
         for (variant, code) in registry {
@@ -2368,7 +2376,7 @@ mod tests {
     /// collapsed onto `Unknown`.
     #[test]
     fn test_from_result_code_reads_only_what_the_registry_defines() {
-        for code in [0u32, 1, 7, 11, 24, 25, 33, 255] {
+        for code in [0u32, 1, 7, 11, 24, 25, 33, 34, 255] {
             let variant = Error::from_code(code);
             if code == 0 {
                 assert_eq!(Error::from_result_code(variant.result_code()), None);
@@ -2398,8 +2406,13 @@ mod tests {
         );
         assert_eq!(
             Error::from_result_code(-34),
+            Some(Error::Pending),
+            "34 is Pending: a call accepted to run in a later block (a cross-partition contract call)"
+        );
+        assert_eq!(
+            Error::from_result_code(-35),
             None,
-            "34 is unallocated; if a variant is ever given it, this line must be updated              deliberately"
+            "35 is unallocated; if a variant is ever given it, this line must be updated              deliberately"
         );
     }
     use super::*;
