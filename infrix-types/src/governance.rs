@@ -479,6 +479,10 @@ pub struct IntentGoal {
     pub via: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_type: Option<String>,
+    /// The goal's own parameters, an open JSON object (the node's `customParams,omitempty`). It used to be absent here, so a node goal's
+    /// parameters were silently ignored on read and a Rust caller could not send them (item 2c part 28aa).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_params: Option<serde_json::Map<String, serde_json::Value>>,
     /// The priority the submitter declares; `None` means normal and is absent on
     /// the wire, as the node's `priority,omitempty`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -494,7 +498,153 @@ impl Default for IntentGoal {
             target_state: None,
             via: None,
             custom_type: None,
+            custom_params: None,
             priority: None,
+        }
+    }
+}
+
+/// Hard limits that disqualify paths, in the node's wire form (infrix-schema `intent.IntentConstraints`; every member `omitempty`).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IntentConstraints {
+    #[serde(default, skip_serializing_if = "wire::is_zero_u64")]
+    pub min_output: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_output_decimal: Option<String>,
+    #[serde(default, skip_serializing_if = "wire::is_zero_u64")]
+    pub max_gas: u64,
+    #[serde(default, skip_serializing_if = "wire::is_zero_u64")]
+    pub max_credits: u64,
+    #[serde(default, skip_serializing_if = "wire::is_zero_f64")]
+    pub min_confidence: f64,
+    #[serde(
+        default,
+        rename = "minAvgConfidence",
+        skip_serializing_if = "wire::is_zero_f64"
+    )]
+    pub min_average_confidence: f64,
+    #[serde(default, skip_serializing_if = "wire::is_zero_i64")]
+    pub max_steps: i64,
+    #[serde(default, skip_serializing_if = "wire::is_zero_f64")]
+    pub max_slippage: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_contracts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_contracts: Vec<String>,
+    /// Unix seconds after which the intent is refused.
+    #[serde(default, skip_serializing_if = "wire::is_zero_i64")]
+    pub deadline: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_immune_states: Vec<String>,
+}
+
+/// Soft optimization targets for ranking, in the node's wire form (infrix-schema `intent.IntentPreferences`).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IntentPreferences {
+    /// minimize_cost, maximize_output, maximize_safety, balanced, minimize_steps or custom; the node refuses any other word.
+    #[serde(default)]
+    pub optimize: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_weights: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefer_contracts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub avoid_contracts: Vec<String>,
+    #[serde(default, skip_serializing_if = "wire::is_zero_i64")]
+    pub max_alternatives: i64,
+}
+
+/// THE GOVERNED-SUBMIT WIRE CONTRACT (infrix-core `core.SubmitGovernedRequest`, item 2c part 28aa): the one request every submit door decodes,
+/// on both roots, strictly. The goal is flattened beside the envelope (`goalType` and every other goal member at the top level), the stated
+/// terms and the disclosure context ride under their own names, and the submitter signature (`signature`, `signerPublicKey` and `keyPageRef`
+/// together, or none) is verified by the node over its published canonical preimage. A member the node does not name is refused by name;
+/// so is one here (`deny_unknown_fields`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IntentSubmitRequest {
+    pub goal_type: IntentGoalType,
+    pub actor: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_instance: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_assets: Vec<AssetAmount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_assets: Vec<AssetAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_state: Option<TargetStateSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_params: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<IntentPriority>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<IntentConstraints>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<IntentPreferences>,
+    /// When stated, must be the actor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_address: Option<String>,
+    /// The natural-language words the stated goal was resolved from; never a goal by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<String>,
+    /// The block height the intent expires at (the plan's deadline).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "wire::is_false")]
+    pub preview: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer_public_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_page_ref: Option<String>,
+}
+
+impl IntentSubmitRequest {
+    /// The request for `goal` submitted by `actor`: every goal member carried under the contract's name, nothing else stated.
+    pub fn from_goal(goal: IntentGoal, actor: String) -> Self {
+        Self {
+            goal_type: goal.goal_type,
+            actor,
+            purpose: None,
+            workflow_instance: None,
+            source_assets: goal.source_assets,
+            target_assets: goal.target_assets,
+            target_state: goal.target_state,
+            via: goal.via,
+            custom_type: goal.custom_type,
+            custom_params: goal.custom_params,
+            priority: goal.priority,
+            constraints: None,
+            preferences: None,
+            user_address: None,
+            raw_input: None,
+            expires_at: None,
+            preview: false,
+            signature: None,
+            signer_public_key: None,
+            key_page_ref: None,
+        }
+    }
+
+    /// The goal this request states, member for member.
+    pub fn goal(&self) -> IntentGoal {
+        IntentGoal {
+            goal_type: self.goal_type.clone(),
+            source_assets: self.source_assets.clone(),
+            target_assets: self.target_assets.clone(),
+            target_state: self.target_state.clone(),
+            via: self.via.clone(),
+            custom_type: self.custom_type.clone(),
+            custom_params: self.custom_params.clone(),
+            priority: self.priority,
         }
     }
 }
@@ -536,6 +686,18 @@ mod wire {
 
     pub fn is_false(b: &bool) -> bool {
         !*b
+    }
+
+    pub fn is_zero_u64(v: &u64) -> bool {
+        *v == 0
+    }
+
+    pub fn is_zero_i64(v: &i64) -> bool {
+        *v == 0
+    }
+
+    pub fn is_zero_f64(v: &f64) -> bool {
+        *v == 0.0
     }
 
     /// A Go slice the node leaves nil is written `null`; it is an empty list.
