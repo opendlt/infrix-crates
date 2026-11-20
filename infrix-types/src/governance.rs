@@ -383,15 +383,106 @@ impl IntentGoalType {
 }
 // SDKGEN-END(intent_goal_type)
 
-/// The desired outcome of an intent.
-#[derive(Clone, Debug)]
+/// A goal type travels the wire as its node wire string (`as_str`), and is read
+/// back only through `from_wire`: a string the node does not accept is refused,
+/// never mapped to some other goal.
+impl serde::Serialize for IntentGoalType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for IntentGoalType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct GoalWire;
+        impl<'de> serde::de::Visitor<'de> for GoalWire {
+            type Value = IntentGoalType;
+            fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                f.write_str("a goal type the node accepts")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<IntentGoalType, E> {
+                IntentGoalType::from_wire(v)
+                    .ok_or_else(|| E::invalid_value(serde::de::Unexpected::Str(v), &self))
+            }
+        }
+        deserializer.deserialize_str(GoalWire)
+    }
+}
+
+/// Intent priorities: exactly the node's `ValidIntentPriorities` (infrix-schema
+/// `intent.ValidIntentPriorities`). An intent that declares none is priced as
+/// normal; any other word is refused at admission, by exact match. Serde writes
+/// and reads each as its lowercase word, which is its `as_str()`.
+///
+/// The enum, `ALL`, `as_str` and `from_wire` are generated, not written:
+/// `tools/sdkgen` rewrites the region between the SDKGEN markers from the
+/// `priorities` of `goal-vocabulary.json`, which infrix-core generates from the
+/// set its admission validates. infrix-core's SDKGoalParity fence parses this
+/// enum independently of the generator.
+// SDKGEN-BEGIN(intent_priority)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IntentPriority {
+    High,
+    Normal,
+    Urgent,
+}
+
+impl IntentPriority {
+    /// Every priority the node accepts, in vocabulary order.
+    pub const ALL: [IntentPriority; 3] = [
+        IntentPriority::High,
+        IntentPriority::Normal,
+        IntentPriority::Urgent,
+    ];
+
+    /// Returns the wire word for this priority: exactly the node's
+    /// `ValidIntentPriorities` entry, and the name serde writes. Generated from
+    /// the vendored `goal-vocabulary.json`; do not hand-edit.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IntentPriority::High => "high",
+            IntentPriority::Normal => "normal",
+            IntentPriority::Urgent => "urgent",
+        }
+    }
+
+    /// Parses a wire word back to a priority; `None` for anything the node's
+    /// admission refuses (the match is exact: "URGENT" is not urgent).
+    pub fn from_wire(wire: &str) -> Option<IntentPriority> {
+        match wire {
+            "high" => Some(IntentPriority::High),
+            "normal" => Some(IntentPriority::Normal),
+            "urgent" => Some(IntentPriority::Urgent),
+            _ => None,
+        }
+    }
+}
+// SDKGEN-END(intent_priority)
+
+/// The desired outcome of an intent, in the node's wire form (infrix-schema
+/// `intent.IntentGoal`): `type`, `sourceAssets`, and, when present,
+/// `targetAssets`, `targetState`, `via`, `customType` and `priority`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IntentGoal {
+    #[serde(rename = "type")]
     pub goal_type: IntentGoalType,
+    /// Always on the wire (the node writes `null` for none, read here as empty).
+    #[serde(default, deserialize_with = "wire::null_as_empty")]
     pub source_assets: Vec<AssetAmount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_assets: Vec<AssetAmount>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_state: Option<TargetStateSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_type: Option<String>,
+    /// The priority the submitter declares; `None` means normal and is absent on
+    /// the wire, as the node's `priority,omitempty`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<IntentPriority>,
 }
 
 impl Default for IntentGoal {
@@ -403,26 +494,106 @@ impl Default for IntentGoal {
             target_state: None,
             via: None,
             custom_type: None,
+            priority: None,
         }
     }
 }
 
-/// Asset and quantity.
-#[derive(Clone, Debug)]
+/// Asset and quantity, in the node's wire form (infrix-schema `intent.AssetAmount`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssetAmount {
     pub asset: String,
     pub amount: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount_decimal: Option<String>,
+    #[serde(default, skip_serializing_if = "wire::is_false")]
     pub is_minimum: bool,
+    #[serde(default, skip_serializing_if = "wire::is_false")]
     pub is_maximum: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_standard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_url: Option<String>,
 }
 
-/// Desired on-chain state.
-#[derive(Clone, Debug)]
+/// Desired on-chain state, in the node's wire form (infrix-schema
+/// `intent.TargetStateSpec`): `parameters` is a JSON object of strings.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TargetStateSpec {
     pub state_type: String,
+    #[serde(with = "wire::string_map")]
     pub parameters: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contract: Option<String>,
+}
+
+/// Wire helpers for the node's JSON forms.
+mod wire {
+    #[cfg(feature = "alloc")]
+    use alloc::vec::Vec;
+
+    pub fn is_false(b: &bool) -> bool {
+        !*b
+    }
+
+    /// A Go slice the node leaves nil is written `null`; it is an empty list.
+    pub fn null_as_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        T: serde::Deserialize<'de>,
+    {
+        let list: Option<Vec<T>> = serde::Deserialize::deserialize(deserializer)?;
+        Ok(list.unwrap_or_default())
+    }
+
+    /// A `map[string]string` as ordered pairs: written as a JSON object, read
+    /// from one (or `null`, the node's nil map). A key given twice is refused,
+    /// never resolved by picking one.
+    pub mod string_map {
+        #[cfg(feature = "alloc")]
+        use alloc::{string::String, vec::Vec};
+        use serde::ser::SerializeMap;
+
+        pub fn serialize<S: serde::Serializer>(pairs: &[(String, String)], serializer: S) -> Result<S::Ok, S::Error> {
+            let mut map = serializer.serialize_map(Some(pairs.len()))?;
+            for (k, v) in pairs {
+                map.serialize_entry(k, v)?;
+            }
+            map.end()
+        }
+
+        struct Pairs(Vec<(String, String)>);
+
+        impl<'de> serde::Deserialize<'de> for Pairs {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct PairsVisitor;
+                impl<'de> serde::de::Visitor<'de> for PairsVisitor {
+                    type Value = Pairs;
+                    fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+                        f.write_str("a JSON object of string values")
+                    }
+                    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut access: A) -> Result<Pairs, A::Error> {
+                        let mut out: Vec<(String, String)> = Vec::new();
+                        while let Some((k, v)) = access.next_entry::<String, String>()? {
+                            if out.iter().any(|(seen, _)| *seen == k) {
+                                return Err(serde::de::Error::custom("a parameter key is given twice"));
+                            }
+                            out.push((k, v));
+                        }
+                        Ok(Pairs(out))
+                    }
+                }
+                deserializer.deserialize_map(PairsVisitor)
+            }
+        }
+
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<(String, String)>, D::Error> {
+            let pairs: Option<Pairs> = serde::Deserialize::deserialize(deserializer)?;
+            Ok(pairs.map(|p| p.0).unwrap_or_default())
+        }
+    }
 }
 
 /// Current status of an intent.

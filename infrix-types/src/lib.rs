@@ -505,7 +505,7 @@ impl Address {
     pub fn to_string(&self) -> Option<String> {
         core::str::from_utf8(self.as_bytes())
             .ok()
-            .map(|s| s.to_string())
+            .map(String::from)
     }
 
     /// Get as str (if valid UTF-8)

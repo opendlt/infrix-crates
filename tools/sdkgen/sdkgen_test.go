@@ -191,3 +191,125 @@ func TestPascalCase(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckDetectsAHandEditedPriorityEnum plants the defects the priority rule
+// forbids in the generated IntentPriority enum: a wire word edited by hand, and a
+// word missing. Each is reported against the priority region only.
+func TestCheckDetectsAHandEditedPriorityEnum(t *testing.T) {
+	cases := map[string]func(string) string{
+		"hand-edited wire word": func(s string) string {
+			return strings.Replace(s, `IntentPriority::Urgent => "urgent"`, `IntentPriority::Urgent => "critical"`, 1)
+		},
+		"missing word": func(s string) string {
+			var kept []string
+			for _, line := range strings.SplitAfter(s, "\n") {
+				if strings.Contains(line, "IntentPriority::Urgent") || strings.TrimSpace(line) == "Urgent," {
+					continue
+				}
+				kept = append(kept, line)
+			}
+			return strings.Join(kept, "")
+		},
+	}
+	for name, edit := range cases {
+		root := scratchRepo(t)
+		rewrite(t, root, rustRel, edit)
+		changed, err := generate(root, true)
+		if err != nil {
+			t.Fatalf("%s: generate: %v", name, err)
+		}
+		if len(changed) != 1 || changed[0] != "rust priority" {
+			t.Fatalf("%s: reported as %v; exactly the rust priority region is stale", name, changed)
+		}
+		if _, err := generate(root, false); err != nil {
+			t.Fatalf("%s: regenerate: %v", name, err)
+		}
+		if changed, err := generate(root, true); err != nil || len(changed) != 0 {
+			t.Fatalf("%s: after regeneration the copy is still stale: %v %v", name, changed, err)
+		}
+	}
+}
+
+// TestFloorRejectsAVocabularyMissingAPriority: a vendored vocabulary that lacks a
+// priority the pinned schema declares fails, naming the priority.
+func TestFloorRejectsAVocabularyMissingAPriority(t *testing.T) {
+	root := scratchRepo(t)
+	rewrite(t, root, vocabularyRel, func(s string) string {
+		return strings.Replace(s, `,"urgent"]`, `]`, 1)
+	})
+	_, err := generate(root, true)
+	if err == nil {
+		t.Fatal("a vocabulary lacking a priority the pinned schema declares was accepted")
+	}
+	if !strings.Contains(err.Error(), "urgent") || !strings.Contains(err.Error(), "priority") {
+		t.Fatalf("the floor failure does not name the missing priority: %v", err)
+	}
+}
+
+// TestParsePrioritiesReadsThePinnedSchema: the floor's priorities are the pinned
+// schema's declared set, and a const ValidIntentPriorities does not list is drift.
+func TestParsePrioritiesReadsThePinnedSchema(t *testing.T) {
+	src, err := resolveSchemaGoalSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parsePriorities(src)
+	if err != nil {
+		t.Fatalf("parse the pinned schema's priorities: %v", err)
+	}
+	have := map[string]bool{}
+	for _, p := range got {
+		have[p] = true
+	}
+	for _, p := range []string{"normal", "high", "urgent"} {
+		if !have[p] {
+			t.Errorf("the pinned schema's priorities %v lack %q", got, p)
+		}
+	}
+	drift := filepath.Join(t.TempDir(), "types.go")
+	body := "package intent\n\ntype IntentPriority string\n\nconst (\n\tPriorityNormal IntentPriority = \"normal\"\n\tPriorityLow IntentPriority = \"low\"\n)\n\n" +
+		"var ValidIntentPriorities = map[IntentPriority]bool{\n\tPriorityNormal: true,\n}\n"
+	if err := os.WriteFile(drift, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parsePriorities(drift); err == nil || !strings.Contains(err.Error(), "PriorityLow") {
+		t.Fatalf("a priority const missing from ValidIntentPriorities was not refused by name: %v", err)
+	}
+}
+
+func TestLoadVocabularyRefusesMalformedPriorities(t *testing.T) {
+	goals := `"count":1,"goals":[{"goal":"A_B"}]`
+	cases := map[string]string{
+		"no priorities":    `{` + goals + `}`,
+		"empty priorities": `{` + goals + `,"priorities":[]}`,
+		"upper case":       `{` + goals + `,"priorities":["URGENT"]}`,
+		"padded":           `{` + goals + `,"priorities":[" urgent"]}`,
+		"injection":        `{` + goals + `,"priorities":["a\"; drop"]}`,
+		"duplicate":        `{` + goals + `,"priorities":["high","high"]}`,
+	}
+	for name, body := range cases {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, vocabularyRel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadVocabulary(root); err == nil {
+			t.Errorf("%s: a malformed priority vocabulary was accepted", name)
+		}
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, vocabularyRel), []byte(`{`+goals+`,"priorities":["high","normal","urgent"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v, err := loadVocabulary(root)
+	if err != nil || strings.Join(v.Priorities, ",") != "high,normal,urgent" {
+		t.Fatalf("a well-formed vocabulary was not read as written: %v %v", v.Priorities, err)
+	}
+}
+
+func TestPriorityVariant(t *testing.T) {
+	for word, want := range map[string]string{"normal": "Normal", "high": "High", "urgent": "Urgent"} {
+		if got := priorityVariant(word); got != want || strings.ToLower(got) != word {
+			t.Errorf("priorityVariant(%q) = %q, want %q (lowercase back to the word)", word, got, want)
+		}
+	}
+}
