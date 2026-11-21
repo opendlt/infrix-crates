@@ -13,11 +13,14 @@ crate-type = ["rlib"]
 
 [features]
 default = ["std"]
-std = []
-alloc = []
+std = ["serde/std"]
+alloc = ["serde/alloc"]
 
 [dependencies]
-# No external dependencies for no_std compatibility
+# The one dependency: serde, for the governance types' wire form (IntentGoal and
+# the generated IntentPriority travel as the node's JSON). Without its default
+# features serde is no_std; its std/alloc support follows this crate's features.
+serde = { version = "1", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 # Reads the vendored goal-vocabulary.json (tests/goal_vocabulary.rs).

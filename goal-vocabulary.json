@@ -83,5 +83,6 @@
     {"goal":"VAULT_CREATE","class":"system","required":[["vaultType"],["ownerDid"]],"refusedKeys":["owner"]},
     {"goal":"VERIFIER_RUN","class":"system","required":[["verifierId"],["proofType"],["trustProfileId"]],"refusedKeys":[]},
     {"goal":"WORKFLOW_START","class":"system","required":[["definitionId"]],"refusedKeys":["definitionID","workflowId"]}
-  ]
+  ],
+  "priorities": ["high","normal","urgent"]
 }
