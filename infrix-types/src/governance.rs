@@ -556,6 +556,25 @@ pub struct IntentPreferences {
     pub max_alternatives: i64,
 }
 
+/// The bound on the compact JSON encoding of a requester's metadata (infrix-schema `intent.MaxRequesterMetadataBytes`).
+pub const MAX_REQUESTER_METADATA_BYTES: usize = 4096;
+
+/// The bound on one key of a requester's metadata (infrix-schema `intent.MaxRequesterMetadataKeyBytes`).
+pub const MAX_REQUESTER_METADATA_KEY_BYTES: usize = 128;
+
+/// The size the node measures for a requester's metadata: its compact UTF-8 JSON, with U+2028 and U+2029 at six bytes each.
+pub fn requester_metadata_size(m: &serde_json::Map<String, serde_json::Value>) -> usize {
+    let json = serde_json::to_string(m).unwrap_or_default();
+    let separators = json.chars().filter(|c| *c == '\u{2028}' || *c == '\u{2029}').count();
+    json.len() + 3 * separators
+}
+
+fn alloc_format(args: core::fmt::Arguments<'_>) -> String {
+    let mut out = String::new();
+    let _ = core::fmt::Write::write_fmt(&mut out, args);
+    out
+}
+
 /// THE GOVERNED-SUBMIT WIRE CONTRACT (infrix-core `core.SubmitGovernedRequest`, item 2c part 28aa): the one request every submit door decodes,
 /// on both roots, strictly. The goal is flattened beside the envelope (`goalType` and every other goal member at the top level), the stated
 /// terms and the disclosure context ride under their own names, and the submitter signature (`signature`, `signerPublicKey` and `keyPageRef`
@@ -599,6 +618,12 @@ pub struct IntentSubmitRequest {
     pub expires_at: Option<u64>,
     #[serde(default, skip_serializing_if = "wire::is_false")]
     pub preview: bool,
+    /// The requester's own annotation of the intent (infrix-core item 2c part 28ac row 3): one JSON object of string keys and JSON values,
+    /// recorded by the node as the intent's RequesterMetadata (never as the node's attribution metadata) and bounded by it (keys 1 to
+    /// [MAX_REQUESTER_METADATA_KEY_BYTES] UTF-8 bytes, at most [MAX_REQUESTER_METADATA_BYTES] encoded). [IntentSubmitRequest::check_metadata]
+    /// refuses, by name, metadata the node would refuse. On a signed submission it is signed content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -628,10 +653,43 @@ impl IntentSubmitRequest {
             raw_input: None,
             expires_at: None,
             preview: false,
+            metadata: None,
             signature: None,
             signer_public_key: None,
             key_page_ref: None,
         }
+    }
+
+    /// Refuses, naming what is wrong, requester metadata the node refuses (infrix-schema `intent.ParseRequesterMetadata`): an empty or
+    /// over-long key, or an encoding over [MAX_REQUESTER_METADATA_BYTES]. The size is measured as the node measures it: the compact UTF-8 JSON,
+    /// with U+2028 and U+2029 at six bytes each (the node writes them escaped). No metadata passes.
+    pub fn check_metadata(&self) -> Result<(), String> {
+        let Some(m) = &self.metadata else {
+            return Ok(());
+        };
+        for k in m.keys() {
+            if k.is_empty() {
+                return Err(String::from("metadata refused: a metadata key is empty"));
+            }
+            if k.len() > MAX_REQUESTER_METADATA_KEY_BYTES {
+                return Err(alloc_format(format_args!(
+                    "metadata refused: a metadata key is {} bytes, over the {}-byte bound",
+                    k.len(),
+                    MAX_REQUESTER_METADATA_KEY_BYTES
+                )));
+            }
+        }
+        if m.is_empty() {
+            return Ok(());
+        }
+        let size = requester_metadata_size(m);
+        if size > MAX_REQUESTER_METADATA_BYTES {
+            return Err(alloc_format(format_args!(
+                "metadata refused: metadata encodes to {} bytes, over the {}-byte bound",
+                size, MAX_REQUESTER_METADATA_BYTES
+            )));
+        }
+        Ok(())
     }
 
     /// The goal this request states, member for member.

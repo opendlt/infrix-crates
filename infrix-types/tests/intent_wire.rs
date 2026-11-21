@@ -201,7 +201,8 @@ fn full_sdk_submission() -> serde_json::Value {
         "userAddress": "acc://alice.acme",
         "rawInput": "swap 10 ACME for at least 9 USD",
         "expiresAt": 5000,
-        "preview": true
+        "preview": true,
+        "metadata": { "ref": "order-7", "tags": ["a", "b"], "n": 3 }
     })
 }
 
@@ -217,6 +218,16 @@ fn the_submit_request_round_trips_the_full_governed_submit_contract() {
         0.6
     );
     assert_eq!(req.expires_at, Some(5000));
+    // the requester's own metadata (infrix-core item 2c part 28ac row 3) is carried, member for member, and is within the node's bound
+    assert_eq!(
+        serde_json::Value::Object(
+            req.metadata
+                .clone()
+                .expect("metadata is carried, never ignored")
+        ),
+        json!({ "ref": "order-7", "tags": ["a", "b"], "n": 3 })
+    );
+    assert_eq!(req.check_metadata(), Ok(()));
     let back = serde_json::to_value(&req).expect("serialisable");
     assert_eq!(
         back, wire,
@@ -235,7 +246,8 @@ fn the_submit_request_round_trips_the_full_governed_submit_contract() {
 #[test]
 fn a_member_the_contract_does_not_name_is_refused_by_name() {
     for (member, value) in [
-        ("metadata", json!({ "a": "b" })),
+        // the node's name for the recorded field is not a request member: a request states it as metadata
+        ("requesterMetadata", json!({ "a": "b" })),
         ("publicKey", json!("aa")),
         ("goal", json!({})),
     ] {
@@ -256,4 +268,46 @@ fn a_member_the_contract_does_not_name_is_refused_by_name() {
         serde_json::from_value::<IntentSubmitRequest>(nested).is_err(),
         "an unknown constraint must be refused"
     );
+}
+
+/// Requester metadata is bounded exactly as the node bounds it (infrix-schema TestRequesterMetadataIsMeasuredAsAClientMeasuresIt, the same
+/// vector): '<', '&' and '>' count one byte each, U+2028 counts six; at the bound it passes, over it it is refused by name.
+#[test]
+fn requester_metadata_is_bounded_as_the_node_bounds_it() {
+    use infrix_types::{requester_metadata_size, MAX_REQUESTER_METADATA_BYTES};
+    let with = |v: serde_json::Value| {
+        let mut req: IntentSubmitRequest = serde_json::from_value(full_sdk_submission()).unwrap();
+        req.metadata = Some(v.as_object().unwrap().clone());
+        req
+    };
+    let pad = MAX_REQUESTER_METADATA_BYTES - r#"{"v":"<&>"}"#.len();
+    let at = with(json!({ "v": format!("<&>{}", "x".repeat(pad)) }));
+    assert_eq!(
+        requester_metadata_size(at.metadata.as_ref().unwrap()),
+        MAX_REQUESTER_METADATA_BYTES
+    );
+    assert_eq!(at.check_metadata(), Ok(()));
+    let sep = with(json!({ "v": format!("<&>\u{2028}{}", "x".repeat(pad - 3)) }));
+    assert_eq!(
+        sep.check_metadata(),
+        Err(
+            "metadata refused: metadata encodes to 4099 bytes, over the 4096-byte bound"
+                .to_string()
+        )
+    );
+    let long_key = with(json!({ "k".repeat(129): 1 }));
+    assert_eq!(
+        long_key.check_metadata(),
+        Err("metadata refused: a metadata key is 129 bytes, over the 128-byte bound".to_string())
+    );
+    assert_eq!(
+        with(json!({ "": 1 })).check_metadata(),
+        Err("metadata refused: a metadata key is empty".to_string())
+    );
+    // a non-object is refused by the decode itself, naming the member
+    let mut wire = full_sdk_submission();
+    wire["metadata"] = json!("a=b");
+    let err = serde_json::from_value::<IntentSubmitRequest>(wire)
+        .expect_err("a non-object metadata must be refused");
+    assert!(err.to_string().contains("map"), "{err}");
 }
