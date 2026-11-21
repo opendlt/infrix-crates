@@ -218,6 +218,33 @@ pub fn time_in(shape_name: &str) -> u64 {
     }
 }
 
+/// The node's host buffer for env_shape_history: the host writes at most this many bytes of JSON.
+const SHAPE_HISTORY_MAX: usize = 4096;
+
+/// Returns the contract's last `count` shape transitions as the JSON the host writes (an array of transition records, newest last),
+/// backed by `env_shape_history`, which the node's executor exports (pkg/executor/wazero_infrix_shapes.go). The import was declared
+/// here and never called, so no contract could read its own shape history (item 2c part 28aa).
+///
+/// # Panics
+///
+/// Panics if the contract is not shape-shifting enabled or the host refuses the read (a negative code, named).
+pub fn history(count: u32) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut buf = [0u8; SHAPE_HISTORY_MAX];
+        let len = unsafe { host_shapes::env_shape_history(count as i32, buf.as_mut_ptr()) };
+        if len < 0 {
+            panic!("shape_history({count}): error {len}");
+        }
+        String::from_utf8_lossy(&buf[..len as usize]).into_owned()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (count, SHAPE_HISTORY_MAX);
+        panic_native_shape_host("history", None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +253,7 @@ mod tests {
     #[test]
     fn native_shape_api_fails_closed_instead_of_returning_mock_values() {
         assert!(std::panic::catch_unwind(current_shape).is_err());
+        assert!(std::panic::catch_unwind(|| history(5)).is_err());
         assert!(std::panic::catch_unwind(|| param_u64("ltv_ratio")).is_err());
         assert!(std::panic::catch_unwind(|| param_i64("delta")).is_err());
         assert!(std::panic::catch_unwind(|| param_bool("enabled")).is_err());

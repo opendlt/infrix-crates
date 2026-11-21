@@ -13,14 +13,18 @@ crate-type = ["rlib"]
 
 [features]
 default = ["std"]
-std = ["serde/std"]
-alloc = ["serde/alloc"]
+std = ["serde/std", "serde_json/std"]
+alloc = ["serde/alloc", "serde_json/alloc"]
 
 [dependencies]
 # The one dependency: serde, for the governance types' wire form (IntentGoal and
 # the generated IntentPriority travel as the node's JSON). Without its default
 # features serde is no_std; its std/alloc support follows this crate's features.
 serde = { version = "1", default-features = false, features = ["derive"] }
+# A goal's customParams is an open JSON object (infrix-schema IntentGoal.CustomParams): carried as a serde_json Map so a node goal's
+# parameters are read, never ignored, and a Rust caller can send them (item 2c part 28aa). Without its default features serde_json is
+# no_std; its std/alloc support follows this crate's features.
+serde_json = { version = "1", default-features = false }
 
 [dev-dependencies]
 # Reads the vendored goal-vocabulary.json (tests/goal_vocabulary.rs).
